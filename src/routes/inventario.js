@@ -24,7 +24,7 @@ router.post('/sell-cart', requireAuth, requireRole('admin', 'vendedor'), async (
       conn.release(); conn = null;
       return res.status(400).json({ error: 'Carrito vacío' });
     }
-    if (!['efectivo','tarjeta','transaccion'].includes(metodo_pago)) {
+    if (!['efectivo','tarjeta','nequi','daviplata','addi'].includes(metodo_pago)) {
       conn.release(); conn = null;
       return res.status(400).json({ error: 'Método de pago inválido' });
     }
