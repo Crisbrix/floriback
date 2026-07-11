@@ -16,22 +16,23 @@ router.get('/', async (req, res) => {
 });
 
 router.post('/sell-cart', requireAuth, requireRole('admin', 'vendedor'), async (req, res) => {
-  const conn = await pool.getConnection();
+  let conn;
   try {
+    conn = await pool.getConnection();
     const { items, metodo_pago, total = 0, recibido = 0 } = req.body;
     if (!items || !items.length) {
-      conn.release();
+      conn.release(); conn = null;
       return res.status(400).json({ error: 'Carrito vacío' });
     }
     if (!['efectivo','tarjeta','transaccion'].includes(metodo_pago)) {
-      conn.release();
+      conn.release(); conn = null;
       return res.status(400).json({ error: 'Método de pago inválido' });
     }
     await conn.beginTransaction();
 
     const cambio = Math.max(0, Number(recibido) - Number(total));
     for (let i = 0; i < items.length; i++) {
-      const { nombre, cantidad } = items[i];
+      const { name: nombre, quantity: cantidad } = items[i];
       const [rows] = await conn.query('SELECT stock FROM categorias WHERE nombre = ?', [nombre]);
       if (!rows.length) {
         await conn.rollback(); conn.release();
@@ -53,11 +54,11 @@ router.post('/sell-cart', requireAuth, requireRole('admin', 'vendedor'), async (
     }
 
     await conn.commit();
-    conn.release();
+    conn.release(); conn = null;
     res.status(201).json({ ok: true, items: items.length });
   } catch (err) {
-    await conn.rollback();
-    conn.release();
+    if (conn) { try { await conn.rollback(); } catch {}; conn.release(); }
+    console.error('sell-cart error:', err);
     res.status(500).json({ error: err.message });
   }
 });
