@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import bcrypt from 'bcrypt';
+import bcrypt from 'bcryptjs';
 import { pool } from '../db.js';
 import { generateToken, requireAuth, requireRole } from '../middleware/auth.js';
 
@@ -67,6 +67,24 @@ router.post('/register-admin', requireAuth, requireRole('admin'), async (req, re
       [email, nombre, hash, role]
     );
     res.status(201).json({ id: result.insertId, email, nombre, role });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.patch('/perfil', requireAuth, async (req, res) => {
+  try {
+    const { nombre, password } = req.body;
+    if (!nombre) {
+      return res.status(400).json({ error: 'El nombre es obligatorio' });
+    }
+    if (password) {
+      const hash = await bcrypt.hash(password, 10);
+      await pool.query('UPDATE usuarios SET nombre = ?, password = ? WHERE id = ?', [nombre, hash, req.user.id]);
+    } else {
+      await pool.query('UPDATE usuarios SET nombre = ? WHERE id = ?', [nombre, req.user.id]);
+    }
+    res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

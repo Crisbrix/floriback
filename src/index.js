@@ -24,6 +24,12 @@ app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok' });
 });
 
-app.listen(PORT, () => {
-  console.log(`Floriback corriendo en http://localhost:${PORT}`);
-});
+// Vercel serverless export
+export default app;
+
+// Local development
+if (!process.env.VERCEL) {
+  app.listen(PORT, () => {
+    console.log(`Floriback corriendo en http://localhost:${PORT}`);
+  });
+}
