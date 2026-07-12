@@ -92,7 +92,7 @@ router.get('/stats', requireAuth, requireRole('admin', 'vendedor'), async (req, 
 router.get('/cierre', requireAuth, requireRole('admin', 'vendedor'), async (req, res) => {
   try {
     const esAdmin = req.user.role === 'admin';
-    const filtroUsuario = esAdmin ? '' : 'AND v.vendedor_id = ?';
+    const filtroUsuario = esAdmin ? '' : 'AND vendedor_id = ?';
     const params = esAdmin ? [] : [req.user.id];
 
     const [ventas] = await pool.query(
@@ -102,7 +102,7 @@ router.get('/cierre', requireAuth, requireRole('admin', 'vendedor'), async (req,
               v.comentario
        FROM ventas v
        JOIN usuarios u ON u.id = v.vendedor_id
-       WHERE v.fecha = CURDATE() ${filtroUsuario}
+       WHERE v.fecha = CURDATE() ${esAdmin ? '' : 'AND v.vendedor_id = ?'}
        ORDER BY v.id ASC`,
       params
     );
