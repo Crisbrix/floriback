@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { pool } from '../db.js';
+import { pool, hoyLocal } from '../db.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 
 const router = Router();
@@ -56,7 +56,8 @@ router.get('/stats', requireAuth, requireRole('admin', 'vendedor'), async (req, 
 
     const [ventasHoy] = await pool.query(
       `SELECT COUNT(*) AS cantidad, COALESCE(SUM(total),0) AS ingresos
-       FROM ventas WHERE fecha = CURDATE()`
+       FROM ventas WHERE fecha = ?`,
+      [hoyLocal()]
     );
 
     const [ventasPorVendedor] = await pool.query(
@@ -91,14 +92,16 @@ router.get('/stats', requireAuth, requireRole('admin', 'vendedor'), async (req, 
 
 router.get('/cierre', requireAuth, requireRole('admin', 'vendedor'), async (req, res) => {
   try {
+    const hoy = hoyLocal();
     const esAdmin = req.user.role === 'admin';
     const filtroUsuario = esAdmin ? '' : 'AND vendedor_id = ?';
-    const params = esAdmin ? [] : [req.user.id];
 
     const [[confirmado]] = await pool.query(
-      'SELECT id, confirmado_por, confirmado_en FROM cierres WHERE fecha = CURDATE()'
+      'SELECT id, confirmado_por, confirmado_en FROM cierres WHERE fecha = ?',
+      [hoy]
     );
 
+    const paramsVentas = esAdmin ? [hoy] : [hoy, req.user.id];
     const [ventas] = await pool.query(
       `SELECT v.id, v.producto AS productName, v.cliente AS customer,
               v.cantidad AS quantity, v.total, v.recibido, v.cambio,
@@ -106,21 +109,23 @@ router.get('/cierre', requireAuth, requireRole('admin', 'vendedor'), async (req,
               v.comentario
        FROM ventas v
        JOIN usuarios u ON u.id = v.vendedor_id
-       WHERE v.fecha = CURDATE() ${esAdmin ? '' : 'AND v.vendedor_id = ?'}
+       WHERE v.fecha = ? ${esAdmin ? '' : 'AND v.vendedor_id = ?'}
        ORDER BY v.id ASC`,
-      params
+      paramsVentas
     );
 
+    const paramsResumen = esAdmin ? [hoy] : [hoy, req.user.id];
     const [resumen] = await pool.query(
       `SELECT COUNT(*) AS transacciones, COALESCE(SUM(cantidad),0) AS articulos, COALESCE(SUM(total),0) AS total
-       FROM ventas WHERE fecha = CURDATE() ${filtroUsuario}`,
-      params
+       FROM ventas WHERE fecha = ? ${filtroUsuario}`,
+      paramsResumen
     );
 
+    const paramsMetodos = esAdmin ? [hoy] : [hoy, req.user.id];
     const [metodos] = await pool.query(
       `SELECT metodo_pago, COUNT(*) AS cantidad, COALESCE(SUM(total),0) AS total
-       FROM ventas WHERE fecha = CURDATE() ${filtroUsuario} GROUP BY metodo_pago ORDER BY total DESC`,
-      params
+       FROM ventas WHERE fecha = ? ${filtroUsuario} GROUP BY metodo_pago ORDER BY total DESC`,
+      paramsMetodos
     );
 
     res.json({
@@ -141,11 +146,12 @@ router.get('/cierre', requireAuth, requireRole('admin', 'vendedor'), async (req,
 
 router.post('/cierre/confirmar', requireAuth, requireRole('admin'), async (req, res) => {
   try {
+    const hoy = hoyLocal();
     await pool.query(
-      'INSERT INTO cierres (fecha, confirmado_por) VALUES (CURDATE(), ?) ON DUPLICATE KEY UPDATE confirmado_por = VALUES(confirmado_por), confirmado_en = CURRENT_TIMESTAMP',
-      [req.user.id]
+      'INSERT INTO cierres (fecha, confirmado_por) VALUES (?, ?) ON DUPLICATE KEY UPDATE confirmado_por = VALUES(confirmado_por), confirmado_en = CURRENT_TIMESTAMP',
+      [hoy, req.user.id]
     );
-    res.json({ ok: true, fecha: new Date().toISOString().slice(0, 10) });
+    res.json({ ok: true, fecha: hoy });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

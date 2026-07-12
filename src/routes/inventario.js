@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { pool } from '../db.js';
+import { pool, hoyLocal } from '../db.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 
 const router = Router();
@@ -48,8 +48,8 @@ router.post('/sell-cart', requireAuth, requireRole('admin', 'vendedor'), async (
       const c = i === 0 ? cambio : 0;
       await conn.query(
         `INSERT INTO ventas (producto, cliente, cantidad, total, recibido, cambio, metodo_pago, fecha, vendedor_id, comentario)
-         VALUES (?, 'Cliente', ?, ?, ?, ?, ?, CURDATE(), ?, ?)`,
-        [nombre, cantidad, t, r, c, metodo_pago, req.user.id, comentario]
+         VALUES (?, 'Cliente', ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [nombre, cantidad, t, r, c, metodo_pago, hoyLocal(), req.user.id, comentario]
       );
     }
 
