@@ -95,6 +95,10 @@ router.get('/cierre', requireAuth, requireRole('admin', 'vendedor'), async (req,
     const filtroUsuario = esAdmin ? '' : 'AND vendedor_id = ?';
     const params = esAdmin ? [] : [req.user.id];
 
+    const [[confirmado]] = await pool.query(
+      'SELECT id, confirmado_por, confirmado_en FROM cierres WHERE fecha = CURDATE()'
+    );
+
     const [ventas] = await pool.query(
       `SELECT v.id, v.producto AS productName, v.cliente AS customer,
               v.cantidad AS quantity, v.total, v.recibido, v.cambio,
@@ -123,10 +127,25 @@ router.get('/cierre', requireAuth, requireRole('admin', 'vendedor'), async (req,
       fecha: new Date().toISOString().slice(0, 10),
       usuario: req.user.nombre,
       rol: req.user.role,
+      confirmado: !!confirmado,
+      confirmadoPor: confirmado?.confirmado_por || null,
+      confirmadoEn: confirmado?.confirmado_en || null,
       resumen: resumen[0],
       metodos,
       ventas,
     });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/cierre/confirmar', requireAuth, requireRole('admin'), async (req, res) => {
+  try {
+    await pool.query(
+      'INSERT INTO cierres (fecha, confirmado_por) VALUES (CURDATE(), ?) ON DUPLICATE KEY UPDATE confirmado_por = VALUES(confirmado_por), confirmado_en = CURRENT_TIMESTAMP',
+      [req.user.id]
+    );
+    res.json({ ok: true, fecha: new Date().toISOString().slice(0, 10) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
