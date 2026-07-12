@@ -9,7 +9,8 @@ router.get('/', requireAuth, requireRole('admin', 'vendedor'), async (req, res) 
     const [rows] = await pool.query(
       `SELECT v.id, v.producto AS productName, v.cliente AS customer,
               v.cantidad AS quantity, v.total, v.recibido, v.cambio,
-              v.metodo_pago AS paymentMethod, v.fecha AS date, u.nombre AS vendedor
+              v.metodo_pago AS paymentMethod, v.fecha AS date, u.nombre AS vendedor,
+              v.comentario
        FROM ventas v
        JOIN usuarios u ON u.id = v.vendedor_id
        ORDER BY v.fecha DESC, v.id DESC
@@ -82,6 +83,48 @@ router.get('/stats', requireAuth, requireRole('admin', 'vendedor'), async (req, 
       topProductos,
       inventario,
       ventasPorVendedor,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/cierre', requireAuth, requireRole('admin', 'vendedor'), async (req, res) => {
+  try {
+    const esAdmin = req.user.role === 'admin';
+    const filtroUsuario = esAdmin ? '' : 'AND v.vendedor_id = ?';
+    const params = esAdmin ? [] : [req.user.id];
+
+    const [ventas] = await pool.query(
+      `SELECT v.id, v.producto AS productName, v.cliente AS customer,
+              v.cantidad AS quantity, v.total, v.recibido, v.cambio,
+              v.metodo_pago AS paymentMethod, v.fecha AS date, u.nombre AS vendedor
+       FROM ventas v
+       JOIN usuarios u ON u.id = v.vendedor_id
+       WHERE v.fecha = CURDATE() ${filtroUsuario}
+       ORDER BY v.id ASC`,
+      params
+    );
+
+    const [resumen] = await pool.query(
+      `SELECT COUNT(*) AS transacciones, COALESCE(SUM(cantidad),0) AS articulos, COALESCE(SUM(total),0) AS total
+       FROM ventas WHERE fecha = CURDATE() ${filtroUsuario}`,
+      params
+    );
+
+    const [metodos] = await pool.query(
+      `SELECT metodo_pago, COUNT(*) AS cantidad, COALESCE(SUM(total),0) AS total
+       FROM ventas WHERE fecha = CURDATE() ${filtroUsuario} GROUP BY metodo_pago ORDER BY total DESC`,
+      params
+    );
+
+    res.json({
+      fecha: new Date().toISOString().slice(0, 10),
+      usuario: req.user.nombre,
+      rol: req.user.role,
+      resumen: resumen[0],
+      metodos,
+      ventas,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

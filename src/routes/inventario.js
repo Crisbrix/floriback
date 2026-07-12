@@ -19,7 +19,7 @@ router.post('/sell-cart', requireAuth, requireRole('admin', 'vendedor'), async (
   let conn;
   try {
     conn = await pool.getConnection();
-    const { items, metodo_pago, total = 0, recibido = 0 } = req.body;
+    const { items, metodo_pago, total = 0, recibido = 0, comentario = '' } = req.body;
     if (!items || !items.length) {
       conn.release(); conn = null;
       return res.status(400).json({ error: 'Carrito vacío' });
@@ -47,9 +47,9 @@ router.post('/sell-cart', requireAuth, requireRole('admin', 'vendedor'), async (
       const r = i === 0 ? recibido : 0;
       const c = i === 0 ? cambio : 0;
       await conn.query(
-        `INSERT INTO ventas (producto, cliente, cantidad, total, recibido, cambio, metodo_pago, fecha, vendedor_id)
-         VALUES (?, 'Cliente', ?, ?, ?, ?, ?, CURDATE(), ?)`,
-        [nombre, cantidad, t, r, c, metodo_pago, req.user.id]
+        `INSERT INTO ventas (producto, cliente, cantidad, total, recibido, cambio, metodo_pago, fecha, vendedor_id, comentario)
+         VALUES (?, 'Cliente', ?, ?, ?, ?, ?, CURDATE(), ?, ?)`,
+        [nombre, cantidad, t, r, c, metodo_pago, req.user.id, i === 0 ? comentario : '']
       );
     }
 
