@@ -32,7 +32,7 @@ router.post('/sell-cart', requireAuth, requireRole('admin', 'vendedor'), async (
 
     const cambio = Math.max(0, Number(recibido) - Number(total));
     for (let i = 0; i < items.length; i++) {
-      const { name: nombre, quantity: cantidad } = items[i];
+      const { name: nombre, quantity: cantidad, comentario = '' } = items[i];
       const [rows] = await conn.query('SELECT stock FROM categorias WHERE nombre = ?', [nombre]);
       if (!rows.length) {
         await conn.rollback(); conn.release();
@@ -49,7 +49,7 @@ router.post('/sell-cart', requireAuth, requireRole('admin', 'vendedor'), async (
       await conn.query(
         `INSERT INTO ventas (producto, cliente, cantidad, total, recibido, cambio, metodo_pago, fecha, vendedor_id, comentario)
          VALUES (?, 'Cliente', ?, ?, ?, ?, ?, CURDATE(), ?, ?)`,
-        [nombre, cantidad, t, r, c, metodo_pago, req.user.id, item.comentario || '']
+        [nombre, cantidad, t, r, c, metodo_pago, req.user.id, comentario]
       );
     }
 
