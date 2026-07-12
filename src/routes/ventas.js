@@ -132,4 +132,46 @@ router.get('/cierre', requireAuth, requireRole('admin', 'vendedor'), async (req,
   }
 });
 
+router.delete('/:id(\\d+)', requireAuth, requireRole('admin', 'vendedor'), async (req, res) => {
+  let conn;
+  try {
+    const id = Number(req.params.id);
+    conn = await pool.getConnection();
+    const [rows] = await conn.query('SELECT producto, cantidad FROM ventas WHERE id = ?', [id]);
+    if (!rows.length) {
+      conn.release();
+      return res.status(404).json({ error: 'Venta no encontrada' });
+    }
+    const { producto, cantidad } = rows[0];
+    await conn.beginTransaction();
+    await conn.query('UPDATE categorias SET stock = stock + ? WHERE nombre = ?', [cantidad, producto]);
+    await conn.query('DELETE FROM ventas WHERE id = ?', [id]);
+    await conn.commit();
+    conn.release();
+    res.json({ ok: true });
+  } catch (err) {
+    if (conn) { try { await conn.rollback(); } catch {}; conn.release(); }
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.put('/:id(\\d+)', requireAuth, requireRole('admin', 'vendedor'), async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const { productName, quantity, total, recibido, cambio, paymentMethod, comentario } = req.body;
+    const [rows] = await pool.query(
+      `UPDATE ventas
+       SET producto = ?, cantidad = ?, total = ?, recibido = ?, cambio = ?, metodo_pago = ?, comentario = ?
+       WHERE id = ?`,
+      [productName ?? '', Number(quantity) ?? 0, Number(total) ?? 0, Number(recibido) ?? 0, Number(cambio) ?? 0, paymentMethod ?? 'efectivo', comentario ?? '', id]
+    );
+    if (rows.affectedRows === 0) {
+      return res.status(404).json({ error: 'Venta no encontrada' });
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export default router;
