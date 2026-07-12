@@ -7,7 +7,7 @@ const router = Router();
 router.get('/', async (req, res) => {
   try {
     const [rows] = await pool.query(
-      'SELECT id, nombre AS name, stock, color FROM categorias ORDER BY nombre'
+      'SELECT id, nombre AS name, stock, color, descripcion FROM categorias ORDER BY nombre'
     );
     res.json(rows);
   } catch (err) {
@@ -65,11 +65,17 @@ router.post('/sell-cart', requireAuth, requireRole('admin', 'vendedor'), async (
 
 router.patch('/:nombre', requireAuth, requireRole('admin'), async (req, res) => {
   try {
-    const { stock } = req.body;
-    if (stock === undefined || stock < 0) {
+    const { stock, descripcion } = req.body;
+    if (stock !== undefined && stock < 0) {
       return res.status(400).json({ error: 'Stock inválido' });
     }
-    await pool.query('UPDATE categorias SET stock = ? WHERE nombre = ?', [stock, req.params.nombre]);
+    const fields = [];
+    const values = [];
+    if (stock !== undefined) { fields.push('stock = ?'); values.push(stock); }
+    if (descripcion !== undefined) { fields.push('descripcion = ?'); values.push(descripcion); }
+    if (!fields.length) return res.status(400).json({ error: 'Nada que actualizar' });
+    values.push(req.params.nombre);
+    await pool.query(`UPDATE categorias SET ${fields.join(', ')} WHERE nombre = ?`, values);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });

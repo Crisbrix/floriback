@@ -7,7 +7,7 @@ const router = Router();
 router.get('/', async (req, res) => {
   try {
     const [rows] = await pool.query(
-      `SELECT p.id, p.nombre AS name, p.categoria AS category, p.imagen AS image, p.color, COALESCE(c.stock, 0) AS stock
+      `SELECT p.id, p.nombre AS name, p.categoria AS category, p.imagen AS image, p.color, COALESCE(c.stock, 0) AS stock, c.descripcion
        FROM productos p
        LEFT JOIN categorias c ON c.nombre = p.categoria
        ORDER BY p.creado DESC`

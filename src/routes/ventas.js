@@ -58,6 +58,14 @@ router.get('/stats', requireAuth, requireRole('admin', 'vendedor'), async (req, 
        FROM ventas WHERE fecha = CURDATE()`
     );
 
+    const [ventasPorVendedor] = await pool.query(
+      `SELECT u.nombre AS vendedor, COUNT(*) AS ventas, COALESCE(SUM(v.total),0) AS total
+       FROM ventas v
+       JOIN usuarios u ON u.id = v.vendedor_id
+       GROUP BY v.vendedor_id, u.nombre
+       ORDER BY total DESC`
+    );
+
     res.json({
       resumen: {
         ventas: ventas[0].total,
@@ -73,6 +81,7 @@ router.get('/stats', requireAuth, requireRole('admin', 'vendedor'), async (req, 
       metodos,
       topProductos,
       inventario,
+      ventasPorVendedor,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
