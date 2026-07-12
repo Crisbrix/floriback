@@ -98,7 +98,8 @@ router.get('/cierre', requireAuth, requireRole('admin', 'vendedor'), async (req,
     const [ventas] = await pool.query(
       `SELECT v.id, v.producto AS productName, v.cliente AS customer,
               v.cantidad AS quantity, v.total, v.recibido, v.cambio,
-              v.metodo_pago AS paymentMethod, v.fecha AS date, u.nombre AS vendedor
+              v.metodo_pago AS paymentMethod, v.fecha AS date, u.nombre AS vendedor,
+              v.comentario
        FROM ventas v
        JOIN usuarios u ON u.id = v.vendedor_id
        WHERE v.fecha = CURDATE() ${filtroUsuario}
