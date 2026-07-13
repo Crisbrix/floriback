@@ -8,13 +8,34 @@ router.get('/', requireAuth, requireRole('admin', 'vendedor'), async (req, res) 
   try {
     const [rows] = await pool.query(
       `SELECT v.id, v.producto AS productName, v.cliente AS customer,
+               v.cantidad AS quantity, v.total, v.recibido, v.cambio,
+               v.metodo_pago AS paymentMethod, v.fecha AS date, u.nombre AS vendedor,
+               v.comentario, v.grupo_id AS grupoId
+        FROM ventas v
+        JOIN usuarios u ON u.id = v.vendedor_id
+        ORDER BY v.fecha DESC, v.id DESC
+        LIMIT 100`
+    );
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/vendedor', requireAuth, requireRole('admin'), async (req, res) => {
+  try {
+    const { nombre, fecha } = req.query;
+    if (!nombre || !fecha) return res.status(400).json({ error: 'nombre y fecha requeridos' });
+    const [rows] = await pool.query(
+      `SELECT v.id, v.producto AS productName, v.cliente AS customer,
               v.cantidad AS quantity, v.total, v.recibido, v.cambio,
               v.metodo_pago AS paymentMethod, v.fecha AS date, u.nombre AS vendedor,
-              v.comentario
+              v.comentario, v.grupo_id AS grupoId
        FROM ventas v
        JOIN usuarios u ON u.id = v.vendedor_id
-       ORDER BY v.fecha DESC, v.id DESC
-       LIMIT 100`
+       WHERE u.nombre = ? AND v.fecha = ?
+       ORDER BY v.id ASC`,
+      [nombre, fecha]
     );
     res.json(rows);
   } catch (err) {
@@ -106,13 +127,13 @@ router.get('/cierre', requireAuth, requireRole('admin', 'vendedor'), async (req,
     const paramsVentas = esAdmin ? [hoy] : [hoy, req.user.id];
     const [ventas] = await pool.query(
       `SELECT v.id, v.producto AS productName, v.cliente AS customer,
-              v.cantidad AS quantity, v.total, v.recibido, v.cambio,
-              v.metodo_pago AS paymentMethod, v.fecha AS date, u.nombre AS vendedor,
-              v.comentario
-       FROM ventas v
-       JOIN usuarios u ON u.id = v.vendedor_id
-       WHERE v.fecha = ? ${esAdmin ? '' : 'AND v.vendedor_id = ?'}
-       ORDER BY v.id ASC`,
+               v.cantidad AS quantity, v.total, v.recibido, v.cambio,
+               v.metodo_pago AS paymentMethod, v.fecha AS date, u.nombre AS vendedor,
+               v.comentario, v.grupo_id AS grupoId
+        FROM ventas v
+        JOIN usuarios u ON u.id = v.vendedor_id
+        WHERE v.fecha = ? ${esAdmin ? '' : 'AND v.vendedor_id = ?'}
+        ORDER BY v.id ASC`,
       paramsVentas
     );
 

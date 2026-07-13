@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { Router } from 'express';
 import { pool, hoyLocal } from '../db.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
@@ -31,6 +32,7 @@ router.post('/sell-cart', requireAuth, requireRole('admin', 'vendedor'), async (
     await conn.beginTransaction();
 
     const cambio = Math.max(0, Number(recibido) - Number(total));
+    const grupoId = crypto.randomUUID();
     for (let i = 0; i < items.length; i++) {
       const { name: nombre, quantity: cantidad, comentario = '' } = items[i];
       const [rows] = await conn.query('SELECT stock FROM categorias WHERE nombre = ?', [nombre]);
@@ -47,9 +49,9 @@ router.post('/sell-cart', requireAuth, requireRole('admin', 'vendedor'), async (
       const r = i === 0 ? recibido : 0;
       const c = i === 0 ? cambio : 0;
       await conn.query(
-        `INSERT INTO ventas (producto, cliente, cantidad, total, recibido, cambio, metodo_pago, fecha, vendedor_id, comentario)
-         VALUES (?, 'Cliente', ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [nombre, cantidad, t, r, c, metodo_pago, hoyLocal(), req.user.id, comentario]
+        `INSERT INTO ventas (producto, cliente, cantidad, total, recibido, cambio, metodo_pago, fecha, vendedor_id, comentario, grupo_id)
+         VALUES (?, 'Cliente', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [nombre, cantidad, t, r, c, metodo_pago, hoyLocal(), req.user.id, comentario, grupoId]
       );
     }
 
