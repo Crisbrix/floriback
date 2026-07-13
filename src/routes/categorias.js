@@ -33,8 +33,10 @@ router.put('/:id', requireAuth, requireRole('admin'), async (req, res) => {
     const id = Number(req.params.id);
     const { nombre, color, descripcion } = req.body;
     if (!nombre) return res.status(400).json({ error: 'Nombre requerido' });
-    await pool.query('UPDATE productos SET categoria = ? WHERE categoria = (SELECT nombre FROM categorias WHERE id = ?)', [nombre, id]);
-    await pool.query('UPDATE categorias SET nombre = ?, color = ?, descripcion = ? WHERE id = ?', [nombre, color || '#FFFFFF', descripcion || '', id]);
+    await pool.query(
+      'UPDATE categorias SET nombre = ?, color = ?, descripcion = ? WHERE id = ?',
+      [nombre, color || '#FFFFFF', descripcion || '', id]
+    );
     res.json({ ok: true });
   } catch (err) {
     if (err.code === 'ER_DUP_ENTRY') return res.status(400).json({ error: 'Ya existe una categoría con ese nombre' });
@@ -43,14 +45,20 @@ router.put('/:id', requireAuth, requireRole('admin'), async (req, res) => {
 });
 
 router.delete('/:id', requireAuth, requireRole('admin'), async (req, res) => {
+  let conn;
   try {
     const id = Number(req.params.id);
-    const [[cat]] = await pool.query('SELECT nombre FROM categorias WHERE id = ?', [id]);
-    if (!cat) return res.status(404).json({ error: 'Categoría no encontrada' });
-    await pool.query('DELETE FROM productos WHERE categoria = ?', [cat.nombre]);
-    await pool.query('DELETE FROM categorias WHERE id = ?', [id]);
+    conn = await pool.getConnection();
+    const [[cat]] = await conn.query('SELECT nombre FROM categorias WHERE id = ?', [id]);
+    if (!cat) { conn.release(); return res.status(404).json({ error: 'Categoría no encontrada' }); }
+    await conn.beginTransaction();
+    await conn.query('DELETE FROM productos WHERE categoria = ?', [cat.nombre]);
+    await conn.query('DELETE FROM categorias WHERE id = ?', [id]);
+    await conn.commit();
+    conn.release();
     res.json({ ok: true });
   } catch (err) {
+    if (conn) { try { await conn.rollback(); } catch {}; conn.release(); }
     res.status(500).json({ error: err.message });
   }
 });
