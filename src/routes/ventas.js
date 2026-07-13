@@ -64,8 +64,10 @@ router.get('/stats', requireAuth, requireRole('admin', 'vendedor'), async (req, 
       `SELECT u.nombre AS vendedor, COUNT(*) AS ventas, COALESCE(SUM(v.total),0) AS total
        FROM ventas v
        JOIN usuarios u ON u.id = v.vendedor_id
+       WHERE v.fecha = ?
        GROUP BY v.vendedor_id, u.nombre
-       ORDER BY total DESC`
+       ORDER BY total DESC`,
+      [hoyLocal()]
     );
 
     res.json({
