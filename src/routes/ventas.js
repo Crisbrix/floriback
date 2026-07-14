@@ -113,6 +113,16 @@ router.get('/stats', requireAuth, requireRole('admin', 'vendedor'), async (req, 
   }
 });
 
+router.post('/caja/abrir', requireAuth, requireRole('admin', 'vendedor'), async (req, res) => {
+  try {
+    const hoy = hoyLocal();
+    await pool.query('INSERT INTO aperturas_caja (fecha, abierto_por) VALUES (?, ?)', [hoy, req.user.id]);
+    res.json({ ok: true, fecha: hoy });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/cierre', requireAuth, requireRole('admin', 'vendedor'), async (req, res) => {
   try {
     const hoy = hoyLocal();
@@ -121,6 +131,11 @@ router.get('/cierre', requireAuth, requireRole('admin', 'vendedor'), async (req,
 
     const [[confirmado]] = await pool.query(
       'SELECT id, confirmado_por, confirmado_en FROM cierres WHERE fecha = ?',
+      [hoy]
+    );
+
+    const [[apertura]] = await pool.query(
+      'SELECT id, abierto_por, abierto_en FROM aperturas_caja WHERE fecha = ? LIMIT 1',
       [hoy]
     );
 
@@ -158,6 +173,9 @@ router.get('/cierre', requireAuth, requireRole('admin', 'vendedor'), async (req,
       confirmado: !!confirmado,
       confirmadoPor: confirmado?.confirmado_por || null,
       confirmadoEn: confirmado?.confirmado_en || null,
+      cajaAbierta: !!apertura,
+      aperturaPor: apertura?.abierto_por || null,
+      aperturaEn: apertura?.abierto_en || null,
       resumen: resumen[0],
       metodos,
       ventas,
@@ -175,6 +193,59 @@ router.post('/cierre/confirmar', requireAuth, requireRole('admin'), async (req, 
       [hoy, req.user.id]
     );
     res.json({ ok: true, fecha: hoy });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/informe-mensual', requireAuth, requireRole('admin'), async (req, res) => {
+  try {
+    const { mes } = req.query;
+    if (!mes || !/^\d{4}-\d{2}$/.test(mes)) return res.status(400).json({ error: 'Formato: mes=YYYY-MM' });
+    const inicio = `${mes}-01`;
+    const [y, m] = mes.split('-').map(Number);
+    const ultimoDia = new Date(y, m, 0).getDate();
+    const fin = `${mes}-${String(ultimoDia).padStart(2, '0')}`;
+
+    const [[resumen]] = await pool.query(
+      `SELECT COUNT(*) AS ventas, COALESCE(SUM(cantidad),0) AS articulos, COALESCE(SUM(total),0) AS monto
+       FROM ventas WHERE fecha >= ? AND fecha <= ?`,
+      [inicio, fin]
+    );
+
+    const [porVendedor] = await pool.query(
+      `SELECT u.nombre AS vendedor, COUNT(*) AS ventas, COALESCE(SUM(v.total),0) AS total
+       FROM ventas v
+       JOIN usuarios u ON u.id = v.vendedor_id
+       WHERE v.fecha >= ? AND v.fecha <= ?
+       GROUP BY v.vendedor_id, u.nombre
+       ORDER BY total DESC`,
+      [inicio, fin]
+    );
+
+    const [porMetodo] = await pool.query(
+      `SELECT metodo_pago, COUNT(*) AS cantidad, COALESCE(SUM(total),0) AS total
+       FROM ventas WHERE fecha >= ? AND fecha <= ?
+       GROUP BY metodo_pago
+       ORDER BY total DESC`,
+      [inicio, fin]
+    );
+
+    const [diario] = await pool.query(
+      `SELECT fecha, COUNT(*) AS cantidad, COALESCE(SUM(total),0) AS ingresos
+       FROM ventas WHERE fecha >= ? AND fecha <= ?
+       GROUP BY fecha ORDER BY fecha ASC`,
+      [inicio, fin]
+    );
+
+    const efectivo = porMetodo.filter(m => m.metodo_pago === 'efectivo').reduce((s, m) => s + Number(m.total), 0);
+    const tarjeta = porMetodo.filter(m => m.metodo_pago === 'tarjeta').reduce((s, m) => s + Number(m.total), 0);
+    const nequi = porMetodo.filter(m => m.metodo_pago === 'nequi').reduce((s, m) => s + Number(m.total), 0);
+    const daviplata = porMetodo.filter(m => m.metodo_pago === 'daviplata').reduce((s, m) => s + Number(m.total), 0);
+    const addi = porMetodo.filter(m => m.metodo_pago === 'addi').reduce((s, m) => s + Number(m.total), 0);
+    const transferencias = nequi + daviplata + addi;
+
+    res.json({ mes, resumen, porVendedor, porMetodo, diario, efectivo, tarjeta, nequi, daviplata, addi, transferencias });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
