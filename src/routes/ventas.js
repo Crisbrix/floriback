@@ -264,7 +264,7 @@ router.get('/analytics', requireAuth, requireRole('admin'), async (req, res) => 
     const endMesAnt = new Date(anio, hoyDate.getMonth(), 0);
 
     const all = await pool.query(
-      `SELECT v.*, u.nombre AS vendedor FROM ventas v JOIN usuarios u ON u.id = v.vendedor_id WHERE v.fecha >= ?`, [s12m]
+      `SELECT DATE_FORMAT(v.fecha,'%Y-%m-%d') AS fecha, v.producto, v.cantidad, v.total, v.metodo_pago, v.comentario, v.grupo_id, u.nombre AS vendedor FROM ventas v JOIN usuarios u ON u.id = v.vendedor_id WHERE v.fecha >= ?`, [s12m]
     );
     const rows = all[0];
 
