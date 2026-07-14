@@ -255,77 +255,90 @@ router.get('/analytics', requireAuth, requireRole('admin'), async (req, res) => 
   try {
     const hoy = hoyLocal();
     const hoyDate = new Date();
-    const hace30 = new Date(hoyDate); hace30.setDate(hace30.getDate() - 30);
-    const hace12m = new Date(hoyDate); hace12m.setMonth(hace12m.getMonth() - 12);
-    const f30 = hace30.toISOString().slice(0, 10);
-    const f12m = hace12m.toISOString().slice(0, 10);
+    const anio = hoyDate.getFullYear();
+    const mes = String(hoyDate.getMonth() + 1).padStart(2, '0');
+    const f12m = new Date(hoyDate); f12m.setMonth(f12m.getMonth() - 12);
+    const s12m = f12m.toISOString().slice(0, 10);
+    const startMes = `${anio}-${mes}-01`;
+    const startMesAnt = new Date(anio, hoyDate.getMonth() - 1, 1);
+    const endMesAnt = new Date(anio, hoyDate.getMonth(), 0);
 
-    const startMes = `${hoyDate.getFullYear()}-${String(hoyDate.getMonth() + 1).padStart(2, '0')}-01`;
-    const startMesAnt = new Date(hoyDate.getFullYear(), hoyDate.getMonth() - 1, 1);
-    const endMesAnt = new Date(hoyDate.getFullYear(), hoyDate.getMonth(), 0);
+    const all = await pool.query(
+      `SELECT v.*, u.nombre AS vendedor FROM ventas v JOIN usuarios u ON u.id = v.vendedor_id WHERE v.fecha >= ?`, [s12m]
+    );
+    const rows = all[0];
 
-    let r;
-    r = await pool.query(`SELECT fecha, COUNT(*) AS cantidad, COALESCE(SUM(total),0) AS ingresos FROM ventas WHERE fecha >= ? GROUP BY fecha ORDER BY fecha ASC`, [f30]);
-    const ventasDiarias = r[0];
-    r = await pool.query(`SELECT YEARWEEK(fecha,1) AS semana, MIN(fecha) AS inicio_semana, COUNT(*) AS cantidad, COALESCE(SUM(total),0) AS ingresos FROM ventas WHERE fecha >= ? GROUP BY YEARWEEK(fecha,1) ORDER BY semana ASC`, [f30]);
-    const ventasSemanales = r[0];
-    r = await pool.query(`SELECT DATE_FORMAT(fecha,'%Y-%m') AS mes, COUNT(*) AS cantidad, COALESCE(SUM(total),0) AS ingresos FROM ventas WHERE fecha >= ? GROUP BY DATE_FORMAT(fecha,'%Y-%m') ORDER BY mes ASC`, [f12m]);
-    const ventasMensuales = r[0];
-    r = await pool.query(`SELECT COUNT(*) AS cantidad, COALESCE(SUM(total),0) AS ingresos FROM ventas WHERE fecha >= ?`, [startMes]);
-    const ventasMesActual = r[0];
-    r = await pool.query(`SELECT COUNT(*) AS cantidad, COALESCE(SUM(total),0) AS ingresos FROM ventas WHERE fecha >= ? AND fecha <= ?`, [startMesAnt.toISOString().slice(0, 10), endMesAnt.toISOString().slice(0, 10)]);
-    const ventasMesAnterior = r[0];
-    r = await pool.query(`SELECT COUNT(*) AS cantidad, COALESCE(SUM(total),0) AS ingresos FROM ventas WHERE fecha >= ?`, [`${hoyDate.getFullYear()}-01-01`]);
-    const ventasAnioActual = r[0];
-    r = await pool.query(`SELECT COUNT(*) AS cantidad, COALESCE(SUM(total),0) AS ingresos FROM ventas WHERE fecha >= ? AND fecha <= ?`, [`${hoyDate.getFullYear()-1}-01-01`, `${hoyDate.getFullYear()-1}-12-31`]);
-    const ventasAnioAnterior = r[0];
-
-    const crecimiento = ventasMesAnterior.ingresos > 0
-      ? Number(((ventasMesActual.ingresos - ventasMesAnterior.ingresos) / ventasMesAnterior.ingresos * 100).toFixed(1))
-      : ventasMesActual.ingresos > 0 ? 100 : 0;
-
-    r = await pool.query(`SELECT COUNT(*) AS ventas, COALESCE(SUM(total),0) AS monto FROM ventas WHERE fecha = ?`, [hoy]);
-    const totalDia = r[0];
-    r = await pool.query(`SELECT COALESCE(SUM(cantidad),0) AS total FROM ventas WHERE fecha = ?`, [hoy]);
-    const productosVendidosDia = r[0].total;
-
-    r = await pool.query(`SELECT DAYOFWEEK(fecha) AS dia_num, CASE DAYOFWEEK(fecha) WHEN 1 THEN 'Domingo' WHEN 2 THEN 'Lunes' WHEN 3 THEN 'Martes' WHEN 4 THEN 'Miércoles' WHEN 5 THEN 'Jueves' WHEN 6 THEN 'Viernes' WHEN 7 THEN 'Sábado' END AS dia, COUNT(*) AS cantidad, COALESCE(SUM(total),0) AS ingresos FROM ventas WHERE fecha >= ? GROUP BY DAYOFWEEK(fecha) ORDER BY dia_num`, [f12m]);
-    const ventasDiaSemana = r[0];
-    r = await pool.query(`SELECT metodo_pago, COUNT(*) AS cantidad, COALESCE(SUM(total),0) AS total FROM ventas GROUP BY metodo_pago ORDER BY total DESC`);
-    const distribucionMetodos = r[0];
-    r = await pool.query(`SELECT producto, SUM(cantidad) AS vendidos, COALESCE(SUM(total),0) AS total FROM ventas GROUP BY producto ORDER BY vendidos DESC LIMIT 10`);
-    const topProductos = r[0];
-    r = await pool.query(`SELECT producto, SUM(cantidad) AS vendidos, COALESCE(SUM(total),0) AS total FROM ventas GROUP BY producto ORDER BY vendidos ASC LIMIT 10`);
-    const bottomProductos = r[0];
-    r = await pool.query(`SELECT c.nombre AS producto, c.stock, COALESCE((SELECT SUM(v.cantidad) FROM ventas v WHERE v.producto = c.nombre), 0) AS vendidos FROM categorias c ORDER BY vendidos DESC`);
-    const rotacionProductos = r[0];
+    const ventasDiarias = agrupar(rows, r => r.fecha, r => ({ cantidad: r.cantidad, total: r.total }));
+    const ventasSemanales = agrupar(rows, r => {
+      const d = new Date(r.fecha + 'T12:00:00');
+      const dia = d.getDay(); const diff = d.getDate() - dia + (dia === 0 ? -6 : 1);
+      return new Date(d.setDate(diff)).toISOString().slice(0, 10);
+    }, r => ({ cantidad: r.cantidad, total: r.total }));
+    const ventasMensuales = agrupar(rows, r => r.fecha.slice(0, 7), r => ({ cantidad: r.cantidad, total: r.total }));
+    const ventasMesActual = rows.filter(r => r.fecha >= startMes).reduce((s, r) => ({ cantidad: s.cantidad + r.cantidad, ingresos: s.ingresos + Number(r.total) }), { cantidad: 0, ingresos: 0 });
+    const ms = startMesAnt.toISOString().slice(0, 10), me = endMesAnt.toISOString().slice(0, 10);
+    const ventasMesAnterior = rows.filter(r => r.fecha >= ms && r.fecha <= me).reduce((s, r) => ({ cantidad: s.cantidad + r.cantidad, ingresos: s.ingresos + Number(r.total) }), { cantidad: 0, ingresos: 0 });
+    const startAnio = `${anio}-01-01`, startAnioAnt = `${anio-1}-01-01`, endAnioAnt = `${anio-1}-12-31`;
+    const ventasAnioActual = rows.filter(r => r.fecha >= startAnio).reduce((s, r) => ({ cantidad: s.cantidad + r.cantidad, ingresos: s.ingresos + Number(r.total) }), { cantidad: 0, ingresos: 0 });
+    const ventasAnioAnterior = rows.filter(r => r.fecha >= startAnioAnt && r.fecha <= endAnioAnt).reduce((s, r) => ({ cantidad: s.cantidad + r.cantidad, ingresos: s.ingresos + Number(r.total) }), { cantidad: 0, ingresos: 0 });
+    const crecimiento = ventasMesAnterior.ingresos > 0 ? Number(((ventasMesActual.ingresos - ventasMesAnterior.ingresos) / ventasMesAnterior.ingresos * 100).toFixed(1)) : ventasMesActual.ingresos > 0 ? 100 : 0;
+    const ventasHoy = rows.filter(r => r.fecha === hoy);
+    const totalDia = ventasHoy.reduce((s, r) => ({ ventas: s.ventas + 1, monto: s.monto + Number(r.total) }), { ventas: 0, monto: 0 });
+    const productosVendidosDia = ventasHoy.reduce((s, r) => s + r.cantidad, 0);
+    const diasSemana = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
+    const vds = rows.reduce(function(acc, r) {
+      const d = new Date(r.fecha + 'T12:00:00').getDay();
+      if (!acc[d]) acc[d] = { dia: diasSemana[d], cantidad: 0, ingresos: 0 };
+      acc[d].cantidad += r.cantidad;
+      acc[d].ingresos += Number(r.total);
+      return acc;
+    }, {});
+    const ventasDiaSemana = Object.values(vds).sort((a,b) => diasSemana.indexOf(a.dia) - diasSemana.indexOf(b.dia));
+    const distribucionMetodos = Object.entries(rows.reduce((map, r) => { map[r.metodo_pago] = (map[r.metodo_pago]||0) + Number(r.total); return map; }, {})).map(([k,v]) => ({ metodo_pago: k, total: v }));
+    const prodMap = rows.reduce((m, r) => { m[r.producto] = (m[r.producto]||0) + r.cantidad; return m; }, {});
+    const prodTotal = rows.reduce((m, r) => { m[r.producto] = (m[r.producto]||0) + Number(r.total); return m; }, {});
+    const topProductos = Object.entries(prodMap).sort((a,b) => b[1]-a[1]).slice(0,10).map(([k,v]) => ({ producto: k, vendidos: v }));
+    const bottomProductos = Object.entries(prodMap).sort((a,b) => a[1]-b[1]).slice(0,10).map(([k,v]) => ({ producto: k, vendidos: v }));
+    const catData = await pool.query('SELECT nombre, stock FROM categorias ORDER BY nombre');
+    const categorias = catData[0];
+    const rotacionProductos = categorias.map(c => ({ producto: c.nombre, stock: c.stock, vendidos: prodMap[c.nombre] || 0 }));
     const productosSinMovimiento = rotacionProductos.filter(p => p.vendidos === 0).map(p => p.producto);
-    r = await pool.query(`SELECT nombre, stock FROM categorias ORDER BY nombre`);
-    const inventarioCategorias = r[0];
-    const productosAgotados = inventarioCategorias.filter(p => p.stock === 0).length;
-    const productosProximosAgotar = inventarioCategorias.filter(p => p.stock > 0 && p.stock <= 3).length;
-    r = await pool.query(`SELECT v.producto AS categoria, SUM(v.cantidad) AS cantidad, COALESCE(SUM(v.total),0) AS total FROM ventas v GROUP BY v.producto ORDER BY total DESC`);
-    const ventasCategorias = r[0];
+    const inventarioCategorias = categorias;
+    const productosAgotados = categorias.filter(c => c.stock === 0).length;
+    const productosProximosAgotar = categorias.filter(c => c.stock > 0 && c.stock <= 3).length;
+    const ventasCategorias = Object.entries(prodTotal).sort((a,b) => b[1]-a[1]).map(([k,v]) => ({ categoria: k, total: v }));
+    const vendPorVend = rows.reduce((m, r) => { if (!m[r.vendedor]) m[r.vendedor] = { ventas: 0, total: 0, productos: 0 }; m[r.vendedor].ventas++; m[r.vendedor].total += Number(r.total); m[r.vendedor].productos += r.cantidad; return m; }, {});
+    const ventasVendedor = Object.entries(vendPorVend).map(([k,v]) => ({ vendedor: k, ...v })).sort((a,b) => b.total - a.total);
 
-    let productosJuntos = [];
-    try {
-      const r2 = await pool.query(`SELECT a.producto AS prod1, b.producto AS prod2, COUNT(*) AS veces FROM ventas a JOIN ventas b ON a.grupo_id = b.grupo_id AND a.grupo_id IS NOT NULL AND a.producto < b.producto GROUP BY a.producto, b.producto ORDER BY veces DESC LIMIT 15`);
-      productosJuntos = r2[0];
-    } catch {}
+    const grupoRows = rows.filter(r => r.grupo_id);
+    const grupos = new Map();
+    for (const r of grupoRows) {
+      if (!grupos.has(r.grupo_id)) grupos.set(r.grupo_id, []);
+      grupos.get(r.grupo_id).push(r);
+    }
+    const pairs = new Map();
+    for (const [,items] of grupos) {
+      for (let i = 0; i < items.length; i++) {
+        for (let j = i + 1; j < items.length; j++) {
+          const a = items[i].producto < items[j].producto ? items[i].producto : items[j].producto;
+          const b = items[i].producto < items[j].producto ? items[j].producto : items[i].producto;
+          const key = a + '::' + b;
+          pairs.set(key, (pairs.get(key) || 0) + 1);
+        }
+      }
+    }
+    const productosJuntos = Array.from(pairs.entries()).sort((a,b) => b[1]-a[1]).slice(0,15).map(function(e) {
+      const p = e[0].split('::'); return { prod1: p[0], prod2: p[1], veces: e[1] };
+    });
+    const promArr = Array.from(grupos.values()).map(items => items.reduce((s, r) => s + r.cantidad, 0));
+    const cantidadPromedio = promArr.length ? Number((promArr.reduce((s,c) => s + c, 0) / promArr.length).toFixed(1)) : 0;
 
-    r = await pool.query(`SELECT u.nombre AS vendedor, COUNT(*) AS ventas, COALESCE(SUM(v.total),0) AS total, COALESCE(SUM(v.cantidad),0) AS productos FROM ventas v JOIN usuarios u ON u.id = v.vendedor_id WHERE v.fecha >= ? GROUP BY v.vendedor_id, u.nombre ORDER BY total DESC`, [f12m]);
-    const ventasVendedor = r[0];
-
-    let cantidadPromedio = 0;
-    try {
-      const r3 = await pool.query(`SELECT AVG(sub.cant) AS promedio FROM (SELECT grupo_id, SUM(cantidad) AS cant FROM ventas WHERE grupo_id IS NOT NULL GROUP BY grupo_id) sub`);
-      cantidadPromedio = r3[0]?.promedio || 0;
-    } catch {}
-
+    const rn = function(arr, key) { return arr.map(d => { var o = {}; o[key] = d.key; o.cantidad = d.cantidad; o.ingresos = d.total; return o; }); };
     res.json({
-      ventasDiarias, ventasSemanales, ventasMensuales,
-      ventasMesActual, ventasMesAnterior,
-      ventasAnioActual, ventasAnioAnterior,
+      ventasDiarias: rn(ventasDiarias, 'fecha'),
+      ventasSemanales: rn(ventasSemanales, 'inicio_semana'),
+      ventasMensuales: rn(ventasMensuales, 'mes'),
+      ventasMesActual, ventasMesAnterior, ventasAnioActual, ventasAnioAnterior,
       crecimiento, totalDia, productosVendidosDia,
       ventasDiaSemana, distribucionMetodos,
       topProductos, bottomProductos, rotacionProductos,
@@ -335,9 +348,21 @@ router.get('/analytics', requireAuth, requireRole('admin'), async (req, res) => 
       cantidadPromedio,
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: err.message, stack: err.stack ? err.stack.split('\n').slice(0,3).join(' | ') : '' });
   }
 });
+
+function agrupar(arr, keyFn, valFn) {
+  const map = new Map();
+  for (const r of arr) {
+    const k = keyFn(r);
+    if (!map.has(k)) map.set(k, { cantidad: 0, total: 0 });
+    const v = map.get(k);
+    v.cantidad += r.cantidad;
+    v.total += Number(r.total);
+  }
+  return Array.from(map.entries()).map(([k, v]) => ({ ...v, key: k }));
+}
 
 router.delete('/:id(\\d+)', requireAuth, requireRole('admin', 'vendedor'), async (req, res) => {
   let conn;
