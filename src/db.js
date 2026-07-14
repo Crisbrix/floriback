@@ -11,6 +11,7 @@ export const pool = mysql.createPool({
   waitForConnections: true,
   connectionLimit: 10,
   dateStrings: true,
+  decimalNumbers: true,
 });
 
 export function hoyLocal() {
