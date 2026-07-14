@@ -257,151 +257,82 @@ router.get('/analytics', requireAuth, requireRole('admin'), async (req, res) => 
     const hoyDate = new Date();
     const hace30 = new Date(hoyDate); hace30.setDate(hace30.getDate() - 30);
     const hace12m = new Date(hoyDate); hace12m.setMonth(hace12m.getMonth() - 12);
-    const hace1a = new Date(hoyDate); hace1a.setFullYear(hace1a.getFullYear() - 1);
     const f30 = hace30.toISOString().slice(0, 10);
     const f12m = hace12m.toISOString().slice(0, 10);
-    const f1a = hace1a.toISOString().slice(0, 10);
 
     const startMes = `${hoyDate.getFullYear()}-${String(hoyDate.getMonth() + 1).padStart(2, '0')}-01`;
     const startMesAnt = new Date(hoyDate.getFullYear(), hoyDate.getMonth() - 1, 1);
     const endMesAnt = new Date(hoyDate.getFullYear(), hoyDate.getMonth(), 0);
-    const fMA = startMesAnt.toISOString().slice(0, 10);
-    const fMAEnd = endMesAnt.toISOString().slice(0, 10);
 
-    const startAnio = `${hoyDate.getFullYear()}-01-01`;
-    const startAnioAnt = `${hoyDate.getFullYear() - 1}-01-01`;
-    const endAnioAnt = `${hoyDate.getFullYear() - 1}-12-31`;
+    let r;
+    r = await pool.query(`SELECT fecha, COUNT(*) AS cantidad, COALESCE(SUM(total),0) AS ingresos FROM ventas WHERE fecha >= ? GROUP BY fecha ORDER BY fecha ASC`, [f30]);
+    const ventasDiarias = r[0];
+    r = await pool.query(`SELECT YEARWEEK(fecha,1) AS semana, MIN(fecha) AS inicio_semana, COUNT(*) AS cantidad, COALESCE(SUM(total),0) AS ingresos FROM ventas WHERE fecha >= ? GROUP BY YEARWEEK(fecha,1) ORDER BY semana ASC`, [f30]);
+    const ventasSemanales = r[0];
+    r = await pool.query(`SELECT DATE_FORMAT(fecha,'%Y-%m') AS mes, COUNT(*) AS cantidad, COALESCE(SUM(total),0) AS ingresos FROM ventas WHERE fecha >= ? GROUP BY DATE_FORMAT(fecha,'%Y-%m') ORDER BY mes ASC`, [f12m]);
+    const ventasMensuales = r[0];
+    r = await pool.query(`SELECT COUNT(*) AS cantidad, COALESCE(SUM(total),0) AS ingresos FROM ventas WHERE fecha >= ?`, [startMes]);
+    const ventasMesActual = r[0];
+    r = await pool.query(`SELECT COUNT(*) AS cantidad, COALESCE(SUM(total),0) AS ingresos FROM ventas WHERE fecha >= ? AND fecha <= ?`, [startMesAnt.toISOString().slice(0, 10), endMesAnt.toISOString().slice(0, 10)]);
+    const ventasMesAnterior = r[0];
+    r = await pool.query(`SELECT COUNT(*) AS cantidad, COALESCE(SUM(total),0) AS ingresos FROM ventas WHERE fecha >= ?`, [`${hoyDate.getFullYear()}-01-01`]);
+    const ventasAnioActual = r[0];
+    r = await pool.query(`SELECT COUNT(*) AS cantidad, COALESCE(SUM(total),0) AS ingresos FROM ventas WHERE fecha >= ? AND fecha <= ?`, [`${hoyDate.getFullYear()-1}-01-01`, `${hoyDate.getFullYear()-1}-12-31`]);
+    const ventasAnioAnterior = r[0];
 
-    const [ventasDiarias] = await pool.query(
-      `SELECT fecha, COUNT(*) AS cantidad, COALESCE(SUM(total),0) AS ingresos
-       FROM ventas WHERE fecha >= ? GROUP BY fecha ORDER BY fecha ASC`, [f30]
-    );
+    const crecimiento = ventasMesAnterior.ingresos > 0
+      ? Number(((ventasMesActual.ingresos - ventasMesAnterior.ingresos) / ventasMesAnterior.ingresos * 100).toFixed(1))
+      : ventasMesActual.ingresos > 0 ? 100 : 0;
 
-    const [ventasSemanales] = await pool.query(
-      `SELECT YEARWEEK(fecha,1) AS semana, MIN(fecha) AS inicio_semana,
-              COUNT(*) AS cantidad, COALESCE(SUM(total),0) AS ingresos
-       FROM ventas WHERE fecha >= ? GROUP BY YEARWEEK(fecha,1) ORDER BY semana ASC`, [f30]
-    );
+    r = await pool.query(`SELECT COUNT(*) AS ventas, COALESCE(SUM(total),0) AS monto FROM ventas WHERE fecha = ?`, [hoy]);
+    const totalDia = r[0];
+    r = await pool.query(`SELECT COALESCE(SUM(cantidad),0) AS total FROM ventas WHERE fecha = ?`, [hoy]);
+    const productosVendidosDia = r[0].total;
 
-    const [ventasMensuales] = await pool.query(
-      `SELECT DATE_FORMAT(fecha,'%Y-%m') AS mes, COUNT(*) AS cantidad, COALESCE(SUM(total),0) AS ingresos
-       FROM ventas WHERE fecha >= ? GROUP BY DATE_FORMAT(fecha,'%Y-%m') ORDER BY mes ASC`, [f12m]
-    );
-
-    const [ventasMesActual] = await pool.query(
-      `SELECT COUNT(*) AS cantidad, COALESCE(SUM(total),0) AS ingresos FROM ventas WHERE fecha >= ?`, [startMes]
-    );
-
-    const [ventasMesAnterior] = await pool.query(
-      `SELECT COUNT(*) AS cantidad, COALESCE(SUM(total),0) AS ingresos FROM ventas WHERE fecha >= ? AND fecha <= ?`,
-      [fMA, fMAEnd]
-    );
-
-    const [ventasAnioActual] = await pool.query(
-      `SELECT COUNT(*) AS cantidad, COALESCE(SUM(total),0) AS ingresos FROM ventas WHERE fecha >= ?`, [startAnio]
-    );
-
-    const [ventasAnioAnterior] = await pool.query(
-      `SELECT COUNT(*) AS cantidad, COALESCE(SUM(total),0) AS ingresos FROM ventas WHERE fecha >= ? AND fecha <= ?`,
-      [startAnioAnt, endAnioAnt]
-    );
-
-    const crecimiento = ventasMesAnterior[0].ingresos > 0
-      ? ((ventasMesActual[0].ingresos - ventasMesAnterior[0].ingresos) / ventasMesAnterior[0].ingresos * 100).toFixed(1)
-      : ventasMesActual[0].ingresos > 0 ? 100 : 0;
-
-    const [totalDia] = await pool.query(
-      `SELECT COUNT(*) AS ventas, COALESCE(SUM(total),0) AS monto FROM ventas WHERE fecha = ?`, [hoy]
-    );
-
-    const [productosVendidosDia] = await pool.query(
-      `SELECT COALESCE(SUM(cantidad),0) AS total FROM ventas WHERE fecha = ?`, [hoy]
-    );
-
-    const [ventasDiaSemana] = await pool.query(
-      `SELECT DAYOFWEEK(fecha) AS dia_num,
-              CASE DAYOFWEEK(fecha)
-                WHEN 1 THEN 'Domingo' WHEN 2 THEN 'Lunes' WHEN 3 THEN 'Martes'
-                WHEN 4 THEN 'Miércoles' WHEN 5 THEN 'Jueves' WHEN 6 THEN 'Viernes'
-                WHEN 7 THEN 'Sábado'
-              END AS dia,
-              COUNT(*) AS cantidad, COALESCE(SUM(total),0) AS ingresos
-       FROM ventas WHERE fecha >= ?
-       GROUP BY DAYOFWEEK(fecha) ORDER BY dia_num`, [f12m]
-    );
-
-    const [distribucionMetodos] = await pool.query(
-      `SELECT metodo_pago, COUNT(*) AS cantidad, COALESCE(SUM(total),0) AS total
-       FROM ventas GROUP BY metodo_pago ORDER BY total DESC`
-    );
-
-    const [topProductos] = await pool.query(
-      `SELECT producto, SUM(cantidad) AS vendidos, COALESCE(SUM(total),0) AS total
-       FROM ventas GROUP BY producto ORDER BY vendidos DESC LIMIT 10`
-    );
-
-    const [bottomProductos] = await pool.query(
-      `SELECT producto, SUM(cantidad) AS vendidos, COALESCE(SUM(total),0) AS total
-       FROM ventas GROUP BY producto ORDER BY vendidos ASC LIMIT 10`
-    );
-
-    const [rotacionProductos] = await pool.query(
-      `SELECT c.nombre AS producto, c.stock,
-              COALESCE((SELECT SUM(v.cantidad) FROM ventas v WHERE v.producto = c.nombre), 0) AS vendidos
-       FROM categorias c ORDER BY vendidos DESC`
-    );
-
+    r = await pool.query(`SELECT DAYOFWEEK(fecha) AS dia_num, CASE DAYOFWEEK(fecha) WHEN 1 THEN 'Domingo' WHEN 2 THEN 'Lunes' WHEN 3 THEN 'Martes' WHEN 4 THEN 'Miércoles' WHEN 5 THEN 'Jueves' WHEN 6 THEN 'Viernes' WHEN 7 THEN 'Sábado' END AS dia, COUNT(*) AS cantidad, COALESCE(SUM(total),0) AS ingresos FROM ventas WHERE fecha >= ? GROUP BY DAYOFWEEK(fecha) ORDER BY dia_num`, [f12m]);
+    const ventasDiaSemana = r[0];
+    r = await pool.query(`SELECT metodo_pago, COUNT(*) AS cantidad, COALESCE(SUM(total),0) AS total FROM ventas GROUP BY metodo_pago ORDER BY total DESC`);
+    const distribucionMetodos = r[0];
+    r = await pool.query(`SELECT producto, SUM(cantidad) AS vendidos, COALESCE(SUM(total),0) AS total FROM ventas GROUP BY producto ORDER BY vendidos DESC LIMIT 10`);
+    const topProductos = r[0];
+    r = await pool.query(`SELECT producto, SUM(cantidad) AS vendidos, COALESCE(SUM(total),0) AS total FROM ventas GROUP BY producto ORDER BY vendidos ASC LIMIT 10`);
+    const bottomProductos = r[0];
+    r = await pool.query(`SELECT c.nombre AS producto, c.stock, COALESCE((SELECT SUM(v.cantidad) FROM ventas v WHERE v.producto = c.nombre), 0) AS vendidos FROM categorias c ORDER BY vendidos DESC`);
+    const rotacionProductos = r[0];
     const productosSinMovimiento = rotacionProductos.filter(p => p.vendidos === 0).map(p => p.producto);
-
-    const [inventarioCategorias] = await pool.query(
-      `SELECT nombre, stock FROM categorias ORDER BY nombre`
-    );
-
+    r = await pool.query(`SELECT nombre, stock FROM categorias ORDER BY nombre`);
+    const inventarioCategorias = r[0];
     const productosAgotados = inventarioCategorias.filter(p => p.stock === 0).length;
     const productosProximosAgotar = inventarioCategorias.filter(p => p.stock > 0 && p.stock <= 3).length;
+    r = await pool.query(`SELECT v.producto AS categoria, SUM(v.cantidad) AS cantidad, COALESCE(SUM(v.total),0) AS total FROM ventas v GROUP BY v.producto ORDER BY total DESC`);
+    const ventasCategorias = r[0];
 
-    const [ventasCategorias] = await pool.query(
-      `SELECT v.producto AS categoria, SUM(v.cantidad) AS cantidad, COALESCE(SUM(v.total),0) AS total
-       FROM ventas v GROUP BY v.producto ORDER BY total DESC`
-    );
+    let productosJuntos = [];
+    try {
+      const r2 = await pool.query(`SELECT a.producto AS prod1, b.producto AS prod2, COUNT(*) AS veces FROM ventas a JOIN ventas b ON a.grupo_id = b.grupo_id AND a.grupo_id IS NOT NULL AND a.producto < b.producto GROUP BY a.producto, b.producto ORDER BY veces DESC LIMIT 15`);
+      productosJuntos = r2[0];
+    } catch {}
 
-    const [productosJuntos] = await pool.query(
-      `SELECT a.producto AS prod1, b.producto AS prod2, COUNT(*) AS veces
-       FROM ventas a
-       JOIN ventas b ON a.grupo_id = b.grupo_id AND a.grupo_id IS NOT NULL AND a.producto < b.producto
-       GROUP BY a.producto, b.producto
-       ORDER BY veces DESC LIMIT 15`
-    );
+    r = await pool.query(`SELECT u.nombre AS vendedor, COUNT(*) AS ventas, COALESCE(SUM(v.total),0) AS total, COALESCE(SUM(v.cantidad),0) AS productos FROM ventas v JOIN usuarios u ON u.id = v.vendedor_id WHERE v.fecha >= ? GROUP BY v.vendedor_id, u.nombre ORDER BY total DESC`, [f12m]);
+    const ventasVendedor = r[0];
 
-    const [ventasVendedor] = await pool.query(
-      `SELECT u.nombre AS vendedor, COUNT(*) AS ventas,
-              COALESCE(SUM(v.total),0) AS total, COALESCE(SUM(v.cantidad),0) AS productos
-       FROM ventas v
-       JOIN usuarios u ON u.id = v.vendedor_id
-       WHERE v.fecha >= ?
-       GROUP BY v.vendedor_id, u.nombre
-       ORDER BY total DESC`, [f12m]
-    );
-
-    const [cantidadPromedio] = await pool.query(
-      `SELECT AVG(sub.cant) AS promedio FROM (
-         SELECT grupo_id, SUM(cantidad) AS cant FROM ventas WHERE grupo_id IS NOT NULL GROUP BY grupo_id
-       ) sub`
-    );
+    let cantidadPromedio = 0;
+    try {
+      const r3 = await pool.query(`SELECT AVG(sub.cant) AS promedio FROM (SELECT grupo_id, SUM(cantidad) AS cant FROM ventas WHERE grupo_id IS NOT NULL GROUP BY grupo_id) sub`);
+      cantidadPromedio = r3[0]?.promedio || 0;
+    } catch {}
 
     res.json({
       ventasDiarias, ventasSemanales, ventasMensuales,
-      ventasMesActual: ventasMesActual[0], ventasMesAnterior: ventasMesAnterior[0],
-      ventasAnioActual: ventasAnioActual[0], ventasAnioAnterior: ventasAnioAnterior[0],
-      crecimiento: Number(crecimiento),
-      totalDia: totalDia[0],
-      productosVendidosDia: productosVendidosDia[0].total,
+      ventasMesActual, ventasMesAnterior,
+      ventasAnioActual, ventasAnioAnterior,
+      crecimiento, totalDia, productosVendidosDia,
       ventasDiaSemana, distribucionMetodos,
       topProductos, bottomProductos, rotacionProductos,
       productosSinMovimiento, inventarioCategorias,
       productosAgotados, productosProximosAgotar,
       ventasCategorias, productosJuntos, ventasVendedor,
-      cantidadPromedio: cantidadPromedio[0]?.promedio || 0,
+      cantidadPromedio,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
