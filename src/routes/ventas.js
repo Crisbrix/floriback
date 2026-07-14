@@ -351,14 +351,14 @@ router.get('/analytics', requireAuth, requireRole('admin'), async (req, res) => 
        FROM categorias c ORDER BY vendidos DESC`
     );
 
-    const productosSinMovimiento = rotacionProductos.filter((p: any) => p.vendidos === 0).map((p: any) => p.producto);
+    const productosSinMovimiento = rotacionProductos.filter(p => p.vendidos === 0).map(p => p.producto);
 
     const [inventarioCategorias] = await pool.query(
       `SELECT nombre, stock FROM categorias ORDER BY nombre`
     );
 
-    const productosAgotados = inventarioCategorias.filter((p: any) => p.stock === 0).length;
-    const productosProximosAgotar = inventarioCategorias.filter((p: any) => p.stock > 0 && p.stock <= 3).length;
+    const productosAgotados = inventarioCategorias.filter(p => p.stock === 0).length;
+    const productosProximosAgotar = inventarioCategorias.filter(p => p.stock > 0 && p.stock <= 3).length;
 
     const [ventasCategorias] = await pool.query(
       `SELECT v.producto AS categoria, SUM(v.cantidad) AS cantidad, COALESCE(SUM(v.total),0) AS total
