@@ -225,7 +225,7 @@ router.get('/cierres', requireAuth, requireRole('admin'), async (req, res) => {
        ) v ON v.fecha = c.fecha
        ORDER BY c.fecha DESC`
     );
-    res.json(rows[0]);
+    res.json(rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
