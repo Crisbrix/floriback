@@ -6,16 +6,30 @@ const router = Router();
 
 router.get('/', requireAuth, requireRole('admin', 'vendedor'), async (req, res) => {
   try {
-    const [rows] = await pool.query(
-      `SELECT v.id, v.producto AS productName, v.cliente AS customer,
+    const { fecha } = req.query;
+    let query, params;
+    if (fecha) {
+      query = `SELECT v.id, v.producto AS productName, v.cliente AS customer,
+               v.cantidad AS quantity, v.total, v.recibido, v.cambio,
+               v.metodo_pago AS paymentMethod, v.fecha AS date, u.nombre AS vendedor,
+               v.comentario, v.grupo_id AS grupoId
+        FROM ventas v
+        JOIN usuarios u ON u.id = v.vendedor_id
+        WHERE v.fecha = ?
+        ORDER BY v.id ASC`;
+      params = [fecha];
+    } else {
+      query = `SELECT v.id, v.producto AS productName, v.cliente AS customer,
                v.cantidad AS quantity, v.total, v.recibido, v.cambio,
                v.metodo_pago AS paymentMethod, v.fecha AS date, u.nombre AS vendedor,
                v.comentario, v.grupo_id AS grupoId
         FROM ventas v
         JOIN usuarios u ON u.id = v.vendedor_id
         ORDER BY v.fecha DESC, v.id DESC
-        LIMIT 100`
-    );
+        LIMIT 100`;
+      params = [];
+    }
+    const [rows] = await pool.query(query, params);
     res.json(rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -193,6 +207,25 @@ router.post('/cierre/confirmar', requireAuth, requireRole('admin'), async (req, 
       [hoy, req.user.id]
     );
     res.json({ ok: true, fecha: hoy });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/cierres', requireAuth, requireRole('admin'), async (req, res) => {
+  try {
+    const [rows] = await pool.query(
+      `SELECT c.id, c.fecha, c.confirmado_en, u.nombre AS confirmado_por,
+              COALESCE(v.ventas, 0) AS ventas, COALESCE(v.articulos, 0) AS articulos, COALESCE(v.total, 0) AS total
+       FROM cierres c
+       JOIN usuarios u ON u.id = c.confirmado_por
+       LEFT JOIN (
+         SELECT fecha, COUNT(*) AS ventas, SUM(cantidad) AS articulos, SUM(total) AS total
+         FROM ventas GROUP BY fecha
+       ) v ON v.fecha = c.fecha
+       ORDER BY c.fecha DESC`
+    );
+    res.json(rows[0]);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
