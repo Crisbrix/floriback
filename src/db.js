@@ -15,6 +15,7 @@ export const pool = mysql.createPool({
 });
 
 export function hoyLocal() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Bogota', year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts();
+  const m = {}; parts.forEach(p => m[p.type] = p.value);
+  return `${m.year}-${m.month}-${m.day}`;
 }
