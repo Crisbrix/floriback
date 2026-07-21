@@ -9,7 +9,6 @@ import inventarioRoutes from './routes/inventario.js';
 import ventaRoutes from './routes/ventas.js';
 import categoriaRoutes from './routes/categorias.js';
 import apartadoRoutes from './routes/apartados.js';
-import imageRoutes from './routes/images.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -32,7 +31,6 @@ app.use('/api/inventario', inventarioRoutes);
 app.use('/api/ventas', ventaRoutes);
 app.use('/api/categorias', categoriaRoutes);
 app.use('/api/apartados', apartadoRoutes);
-app.use('/api/images', imageRoutes);
 
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok' });
