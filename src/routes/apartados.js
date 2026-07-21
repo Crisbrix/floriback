@@ -4,6 +4,7 @@ import { requireAuth, requireRole } from '../middleware/auth.js';
 
 const router = Router();
 
+//Lista apartados (admin ve todos, vendedor solo los suyos)
 router.get('/', requireAuth, requireRole('admin', 'vendedor'), async (req, res) => {
   try {
     const esAdmin = req.user.role === 'admin';
@@ -29,6 +30,7 @@ router.get('/', requireAuth, requireRole('admin', 'vendedor'), async (req, res) 
   }
 });
 
+//Crea apartado
 router.post('/', requireAuth, requireRole('admin', 'vendedor'), async (req, res) => {
   try {
     const { clienteNombre, clienteCelular, clienteCorreo, producto, abono, saldo, comentario } = req.body;
@@ -44,6 +46,7 @@ router.post('/', requireAuth, requireRole('admin', 'vendedor'), async (req, res)
   }
 });
 
+//Actualiza apartado
 router.put('/:id', requireAuth, requireRole('admin', 'vendedor'), async (req, res) => {
   try {
     const id = Number(req.params.id);
@@ -69,6 +72,7 @@ router.put('/:id', requireAuth, requireRole('admin', 'vendedor'), async (req, re
   }
 });
 
+//Elimina apartado (solo admin)
 router.delete('/:id', requireAuth, requireRole('admin'), async (req, res) => {
   try {
     const id = Number(req.params.id);

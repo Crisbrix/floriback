@@ -2,6 +2,7 @@ import jwt from 'jsonwebtoken';
 
 const SECRET = process.env.JWT_SECRET || 'floripondia_secret_cambiar_en_produccion';
 
+//Genera token JWT valido 24h
 export function generateToken(user) {
   return jwt.sign(
     { id: user.id, email: user.email, nombre: user.nombre, role: user.role },
@@ -10,6 +11,7 @@ export function generateToken(user) {
   );
 }
 
+//Verifica token en header Authorization
 export function requireAuth(req, res, next) {
   const header = req.headers.authorization;
   if (!header || !header.startsWith('Bearer ')) {
@@ -23,6 +25,7 @@ export function requireAuth(req, res, next) {
   }
 }
 
+//Restringe acceso por rol (admin, vendedor)
 export function requireRole(...roles) {
   return (req, res, next) => {
     if (!req.user || !roles.includes(req.user.role)) {

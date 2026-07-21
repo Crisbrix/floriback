@@ -5,6 +5,7 @@ import { generateToken, requireAuth, requireRole } from '../middleware/auth.js';
 
 const router = Router();
 
+//Login: verifica credenciales y devuelve JWT
 router.post('/login', async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -27,6 +28,7 @@ router.post('/login', async (req, res) => {
   }
 });
 
+//Registro publico con rol cliente
 router.post('/register', async (req, res) => {
   try {
     const { email, nombre, password } = req.body;
@@ -48,6 +50,7 @@ router.post('/register', async (req, res) => {
   }
 });
 
+//Registro de admin/vendedor por admin
 router.post('/register-admin', requireAuth, requireRole('admin'), async (req, res) => {
   try {
     const { email, nombre, password, role } = req.body;
@@ -72,6 +75,7 @@ router.post('/register-admin', requireAuth, requireRole('admin'), async (req, re
   }
 });
 
+//Actualiza nombre y password del perfil propio
 router.patch('/perfil', requireAuth, async (req, res) => {
   try {
     const { nombre, password } = req.body;

@@ -4,6 +4,7 @@ import { requireAuth, requireRole } from '../middleware/auth.js';
 
 const router = Router();
 
+//Lista todos los usuarios (solo admin)
 router.get('/', requireAuth, requireRole('admin'), async (req, res) => {
   try {
     const [rows] = await pool.query(

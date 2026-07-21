@@ -4,6 +4,7 @@ import { requireAuth, requireRole } from '../middleware/auth.js';
 
 const router = Router();
 
+//Lista ventas, opcionalmente filtradas por fecha
 router.get('/', requireAuth, requireRole('admin', 'vendedor'), async (req, res) => {
   try {
     const { fecha } = req.query;
@@ -36,6 +37,7 @@ router.get('/', requireAuth, requireRole('admin', 'vendedor'), async (req, res) 
   }
 });
 
+//Ventas por vendedor y fecha (modal de vendedor)
 router.get('/vendedor', requireAuth, requireRole('admin'), async (req, res) => {
   try {
     const { nombre, fecha } = req.query;
@@ -57,6 +59,7 @@ router.get('/vendedor', requireAuth, requireRole('admin'), async (req, res) => {
   }
 });
 
+//Estadisticas globales (dashboard)
 router.get('/stats', requireAuth, requireRole('admin', 'vendedor'), async (req, res) => {
   try {
     const [ventas] = await pool.query('SELECT COUNT(*) AS total, COALESCE(SUM(total),0) AS monto FROM ventas');
@@ -127,6 +130,7 @@ router.get('/stats', requireAuth, requireRole('admin', 'vendedor'), async (req, 
   }
 });
 
+//Abre caja del dia
 router.post('/caja/abrir', requireAuth, requireRole('admin', 'vendedor'), async (req, res) => {
   try {
     const hoy = hoyLocal();
@@ -137,6 +141,7 @@ router.post('/caja/abrir', requireAuth, requireRole('admin', 'vendedor'), async 
   }
 });
 
+//Estado del cierre: ventas del dia, resumen, metodos, confirmado
 router.get('/cierre', requireAuth, requireRole('admin', 'vendedor'), async (req, res) => {
   try {
     const hoy = hoyLocal();
@@ -166,18 +171,16 @@ router.get('/cierre', requireAuth, requireRole('admin', 'vendedor'), async (req,
       paramsVentas
     );
 
-    const paramsResumen = esAdmin ? [hoy] : [hoy, req.user.id];
     const [resumen] = await pool.query(
       `SELECT COUNT(*) AS transacciones, COALESCE(SUM(cantidad),0) AS articulos, COALESCE(SUM(total),0) AS total
        FROM ventas WHERE fecha = ? ${filtroUsuario}`,
-      paramsResumen
+      esAdmin ? [hoy] : [hoy, req.user.id]
     );
 
-    const paramsMetodos = esAdmin ? [hoy] : [hoy, req.user.id];
     const [metodos] = await pool.query(
       `SELECT metodo_pago, COUNT(*) AS cantidad, COALESCE(SUM(total),0) AS total
        FROM ventas WHERE fecha = ? ${filtroUsuario} GROUP BY metodo_pago ORDER BY total DESC`,
-      paramsMetodos
+      esAdmin ? [hoy] : [hoy, req.user.id]
     );
 
     res.json({
@@ -185,11 +188,7 @@ router.get('/cierre', requireAuth, requireRole('admin', 'vendedor'), async (req,
       usuario: req.user.nombre,
       rol: req.user.role,
       confirmado: !!confirmado,
-      confirmadoPor: confirmado?.confirmado_por || null,
-      confirmadoEn: confirmado?.confirmado_en || null,
       cajaAbierta: !!apertura,
-      aperturaPor: apertura?.abierto_por || null,
-      aperturaEn: apertura?.abierto_en || null,
       resumen: resumen[0],
       metodos,
       ventas,
@@ -199,6 +198,7 @@ router.get('/cierre', requireAuth, requireRole('admin', 'vendedor'), async (req,
   }
 });
 
+//Confirma cierre de caja del dia (admin)
 router.post('/cierre/confirmar', requireAuth, requireRole('admin'), async (req, res) => {
   try {
     const hoy = hoyLocal();
@@ -212,6 +212,7 @@ router.post('/cierre/confirmar', requireAuth, requireRole('admin'), async (req, 
   }
 });
 
+//Historial de cierres con ventas agregadas
 router.get('/cierres', requireAuth, requireRole('admin'), async (req, res) => {
   try {
     const [rows] = await pool.query(
@@ -231,6 +232,7 @@ router.get('/cierres', requireAuth, requireRole('admin'), async (req, res) => {
   }
 });
 
+//Informe mensual: resumen, por vendedor, por metodo, diario
 router.get('/informe-mensual', requireAuth, requireRole('admin'), async (req, res) => {
   try {
     const { mes } = req.query;
@@ -248,26 +250,21 @@ router.get('/informe-mensual', requireAuth, requireRole('admin'), async (req, re
 
     const [porVendedor] = await pool.query(
       `SELECT u.nombre AS vendedor, COUNT(*) AS ventas, COALESCE(SUM(v.total),0) AS total
-       FROM ventas v
-       JOIN usuarios u ON u.id = v.vendedor_id
+       FROM ventas v JOIN usuarios u ON u.id = v.vendedor_id
        WHERE v.fecha >= ? AND v.fecha <= ?
-       GROUP BY v.vendedor_id, u.nombre
-       ORDER BY total DESC`,
+       GROUP BY v.vendedor_id, u.nombre ORDER BY total DESC`,
       [inicio, fin]
     );
 
     const [porMetodo] = await pool.query(
       `SELECT metodo_pago, COUNT(*) AS cantidad, COALESCE(SUM(total),0) AS total
-       FROM ventas WHERE fecha >= ? AND fecha <= ?
-       GROUP BY metodo_pago
-       ORDER BY total DESC`,
+       FROM ventas WHERE fecha >= ? AND fecha <= ? GROUP BY metodo_pago ORDER BY total DESC`,
       [inicio, fin]
     );
 
     const [diario] = await pool.query(
       `SELECT fecha, COUNT(*) AS cantidad, COALESCE(SUM(total),0) AS ingresos
-       FROM ventas WHERE fecha >= ? AND fecha <= ?
-       GROUP BY fecha ORDER BY fecha ASC`,
+       FROM ventas WHERE fecha >= ? AND fecha <= ? GROUP BY fecha ORDER BY fecha ASC`,
       [inicio, fin]
     );
 
@@ -284,6 +281,7 @@ router.get('/informe-mensual', requireAuth, requireRole('admin'), async (req, re
   }
 });
 
+//Analytics: agrupa ventas de 12 meses en memoria para multiples metricas
 router.get('/analytics', requireAuth, requireRole('admin'), async (req, res) => {
   try {
     const hoy = hoyLocal();
@@ -336,7 +334,6 @@ router.get('/analytics', requireAuth, requireRole('admin'), async (req, res) => 
     const categorias = catData[0];
     const rotacionProductos = categorias.map(c => ({ producto: c.nombre, stock: c.stock, vendidos: prodMap[c.nombre] || 0 }));
     const productosSinMovimiento = rotacionProductos.filter(p => p.vendidos === 0).map(p => p.producto);
-    const inventarioCategorias = categorias;
     const productosAgotados = categorias.filter(c => c.stock === 0).length;
     const productosProximosAgotar = categorias.filter(c => c.stock > 0 && c.stock <= 3).length;
     const ventasCategorias = Object.entries(prodTotal).sort((a,b) => b[1]-a[1]).map(([k,v]) => ({ categoria: k, total: v }));
@@ -375,16 +372,17 @@ router.get('/analytics', requireAuth, requireRole('admin'), async (req, res) => 
       crecimiento, totalDia, productosVendidosDia,
       ventasDiaSemana, distribucionMetodos,
       topProductos, bottomProductos, rotacionProductos,
-      productosSinMovimiento, inventarioCategorias,
+      productosSinMovimiento,
       productosAgotados, productosProximosAgotar,
       ventasCategorias, productosJuntos, ventasVendedor,
       cantidadPromedio,
     });
   } catch (err) {
-    res.status(500).json({ error: err.message, stack: err.stack ? err.stack.split('\n').slice(0,3).join(' | ') : '' });
+    res.status(500).json({ error: err.message });
   }
 });
 
+//Agrupa registros por clave y suma cantidad+total
 function agrupar(arr, keyFn, valFn) {
   const map = new Map();
   for (const r of arr) {
@@ -397,6 +395,7 @@ function agrupar(arr, keyFn, valFn) {
   return Array.from(map.entries()).map(([k, v]) => ({ ...v, key: k }));
 }
 
+//Elimina venta y restaura stock
 router.delete('/:id(\\d+)', requireAuth, requireRole('admin', 'vendedor'), async (req, res) => {
   let conn;
   try {
@@ -420,19 +419,17 @@ router.delete('/:id(\\d+)', requireAuth, requireRole('admin', 'vendedor'), async
   }
 });
 
+//Actualiza venta
 router.put('/:id(\\d+)', requireAuth, requireRole('admin', 'vendedor'), async (req, res) => {
   try {
     const id = Number(req.params.id);
     const { productName, quantity, total, recibido, cambio, paymentMethod, comentario } = req.body;
-    const [rows] = await pool.query(
+    await pool.query(
       `UPDATE ventas
        SET producto = ?, cantidad = ?, total = ?, recibido = ?, cambio = ?, metodo_pago = ?, comentario = ?
        WHERE id = ?`,
       [productName ?? '', Number(quantity) ?? 0, Number(total) ?? 0, Number(recibido) ?? 0, Number(cambio) ?? 0, paymentMethod ?? 'efectivo', comentario ?? '', id]
     );
-    if (rows.affectedRows === 0) {
-      return res.status(404).json({ error: 'Venta no encontrada' });
-    }
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });

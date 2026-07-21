@@ -5,6 +5,7 @@ import { requireAuth, requireRole } from '../middleware/auth.js';
 
 const router = Router();
 
+//Lista inventario (categorias con stock)
 router.get('/', async (req, res) => {
   try {
     const [rows] = await pool.query(
@@ -16,6 +17,7 @@ router.get('/', async (req, res) => {
   }
 });
 
+//Venta multiple (carrito): descuenta stock e inserta ventas en transaccion
 router.post('/sell-cart', requireAuth, requireRole('admin', 'vendedor'), async (req, res) => {
   let conn;
   try {
@@ -65,6 +67,7 @@ router.post('/sell-cart', requireAuth, requireRole('admin', 'vendedor'), async (
   }
 });
 
+//Actualiza stock y descripcion de una categoria
 router.patch('/:nombre', requireAuth, requireRole('admin'), async (req, res) => {
   try {
     const { stock, descripcion } = req.body;

@@ -4,6 +4,7 @@ import { requireAuth, requireRole } from '../middleware/auth.js';
 
 const router = Router();
 
+//Lista productos con stock y descripcion desde categorias
 router.get('/', async (req, res) => {
   try {
     const [rows] = await pool.query(
@@ -18,6 +19,7 @@ router.get('/', async (req, res) => {
   }
 });
 
+//Crea producto
 router.post('/', requireAuth, requireRole('admin', 'vendedor'), async (req, res) => {
   try {
     const { nombre, categoria, imagen } = req.body;
@@ -36,6 +38,7 @@ router.post('/', requireAuth, requireRole('admin', 'vendedor'), async (req, res)
   }
 });
 
+//Actualiza producto
 router.put('/:id', requireAuth, requireRole('admin', 'vendedor'), async (req, res) => {
   try {
     const { nombre, categoria, imagen } = req.body;
@@ -52,6 +55,7 @@ router.put('/:id', requireAuth, requireRole('admin', 'vendedor'), async (req, re
   }
 });
 
+//Elimina producto
 router.delete('/:id', requireAuth, requireRole('admin'), async (req, res) => {
   try {
     await pool.query('DELETE FROM productos WHERE id = ?', [req.params.id]);
