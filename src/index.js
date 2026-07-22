@@ -9,12 +9,13 @@ import inventarioRoutes from './routes/inventario.js';
 import ventaRoutes from './routes/ventas.js';
 import categoriaRoutes from './routes/categorias.js';
 import apartadoRoutes from './routes/apartados.js';
+import uploadRoutes from './routes/upload.js';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 //Cache-control para evitar datos obsoletos
 app.use((_req, res, next) => {
   res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
@@ -31,6 +32,7 @@ app.use('/api/inventario', inventarioRoutes);
 app.use('/api/ventas', ventaRoutes);
 app.use('/api/categorias', categoriaRoutes);
 app.use('/api/apartados', apartadoRoutes);
+app.use('/api/upload', uploadRoutes);
 
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok' });
