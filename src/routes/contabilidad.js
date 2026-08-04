@@ -102,6 +102,7 @@ router.get('/', requireAuth, requireRole('admin'), async (req, res) => {
 
     res.json({ categorias, movimientos, resumen });
   } catch (err) {
+    console.error('contabilidad GET error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
