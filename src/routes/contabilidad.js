@@ -70,7 +70,7 @@ function rangoPeriodo(mes) {
 }
 
 //Lista categorías + movimientos + resumen (inversión, gastos, ventas, balance)
-router.get('/', requireAuth, requireRole('admin', 'vendedor'), async (req, res) => {
+router.get('/', requireAuth, requireRole('admin'), async (req, res) => {
   try {
     const mes = req.query.mes;
     const rango = rangoPeriodo(mes);
@@ -101,7 +101,7 @@ router.get('/', requireAuth, requireRole('admin', 'vendedor'), async (req, res) 
 });
 
 //Crea un movimiento contable (inversión o gasto)
-router.post('/', requireAuth, requireRole('admin', 'vendedor'), async (req, res) => {
+router.post('/', requireAuth, requireRole('admin'), async (req, res) => {
   try {
     const { fecha, tipo, categoria_id, descripcion, monto, es_diario } = req.body;
     if (!TIPOS.includes(tipo)) return res.status(400).json({ error: 'Tipo inválido' });
@@ -173,7 +173,7 @@ router.delete('/categorias/:id(\\d+)', requireAuth, requireRole('admin'), async 
 });
 
 //Actualiza un movimiento contable
-router.put('/:id(\\d+)', requireAuth, requireRole('admin', 'vendedor'), async (req, res) => {
+router.put('/:id(\\d+)', requireAuth, requireRole('admin'), async (req, res) => {
   try {
     const id = Number(req.params.id);
     const { fecha, tipo, categoria_id, descripcion, monto, es_diario } = req.body;
@@ -199,7 +199,7 @@ router.put('/:id(\\d+)', requireAuth, requireRole('admin', 'vendedor'), async (r
 });
 
 //Elimina un movimiento contable
-router.delete('/:id(\\d+)', requireAuth, requireRole('admin', 'vendedor'), async (req, res) => {
+router.delete('/:id(\\d+)', requireAuth, requireRole('admin'), async (req, res) => {
   try {
     const id = Number(req.params.id);
     await pool.query('DELETE FROM contabilidad WHERE id = ?', [id]);
