@@ -36,16 +36,31 @@ router.post('/', requireAuth, requireRole('admin'), async (req, res) => {
   }
 });
 
-//Actualiza categoria
+//Actualiza categoria (renombra y cascadea a sus productos del mismo local)
 router.put('/:id', requireAuth, requireRole('admin'), async (req, res) => {
   try {
     const id = Number(req.params.id);
     const { nombre, color, descripcion } = req.body;
     if (!nombre) return res.status(400).json({ error: 'Nombre requerido' });
-    await pool.query(
-      'UPDATE categorias SET nombre = ?, color = ?, descripcion = ? WHERE id = ?',
-      [nombre, color || '#FFFFFF', descripcion || '', id]
-    );
+    const [[cat]] = await pool.query('SELECT nombre, sucursal FROM categorias WHERE id = ?', [id]);
+    if (!cat) return res.status(404).json({ error: 'Categoría no encontrada' });
+    const conn = await pool.getConnection();
+    try {
+      await conn.beginTransaction();
+      await conn.query(
+        'UPDATE categorias SET nombre = ?, color = ?, descripcion = ? WHERE id = ?',
+        [nombre, color || '#FFFFFF', descripcion || '', id]
+      );
+      if (cat.nombre !== nombre) {
+        await conn.query('UPDATE productos SET categoria = ? WHERE categoria = ? AND sucursal = ?', [nombre, cat.nombre, cat.sucursal]);
+      }
+      await conn.commit();
+    } catch (e) {
+      await conn.rollback();
+      throw e;
+    } finally {
+      conn.release();
+    }
     res.json({ ok: true });
   } catch (err) {
     if (err.code === 'ER_DUP_ENTRY') return res.status(400).json({ error: 'Ya existe una categoría con ese nombre en este local' });
