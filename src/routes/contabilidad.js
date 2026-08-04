@@ -7,7 +7,7 @@ const router = Router();
 const TIPOS = ['inversion', 'gasto'];
 
 //Crea tablas y categorías por defecto si no existen
-const asegurarTablas = (async () => {
+async function asegurarTablas() {
   try {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS contabilidad_categorias (
@@ -20,7 +20,7 @@ const asegurarTablas = (async () => {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS contabilidad (
         id           INT          AUTO_INCREMENT PRIMARY KEY,
-        fecha        DATE         NOT NULL DEFAULT (CURRENT_DATE),
+        fecha        DATE         NOT NULL,
         tipo         ENUM('inversion','gasto') NOT NULL DEFAULT 'gasto',
         categoria_id INT,
         descripcion  TEXT,
@@ -57,7 +57,13 @@ const asegurarTablas = (async () => {
   } catch (err) {
     console.error('contabilidad init error:', err.message);
   }
-})();
+}
+
+//Garantiza tablas/categorías antes de cada request (seguro en serverless)
+router.use(async (req, res, next) => {
+  await asegurarTablas();
+  next();
+});
 
 //Calcula los límites del período según mes (YYYY-MM) o todo
 function rangoPeriodo(mes) {
