@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { pool, hoyLocal } from '../db.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
+import { validaSucursal } from '../lib/sucursal.js';
 
 const router = Router();
 
@@ -75,10 +76,11 @@ function rangoPeriodo(mes) {
   return null;
 }
 
-//Lista categorías + movimientos + resumen (inversión, gastos, ventas, balance)
+//Lista categorías + movimientos + resumen (inversión, gastos, ventas, balance) por local
 router.get('/', requireAuth, requireRole('admin'), async (req, res) => {
   try {
     const mes = req.query.mes;
+    const sucursal = validaSucursal(req.query.sucursal);
     const rango = rangoPeriodo(mes);
 
     const [categorias] = await pool.query(
@@ -91,14 +93,17 @@ router.get('/', requireAuth, requireRole('admin'), async (req, res) => {
         LEFT JOIN contabilidad_categorias c ON c.id = m.categoria_id
         LEFT JOIN usuarios u ON u.id = m.usuario_id`;
     let movParams = [];
+    const conds = ["m.sucursal = ?"];
+    movParams.push(sucursal);
     if (rango) {
-      movQuery += ' WHERE m.fecha >= ? AND m.fecha <= ?';
-      movParams = [rango.inicio, rango.fin];
+      conds.push('m.fecha >= ? AND m.fecha <= ?');
+      movParams.push(rango.inicio, rango.fin);
     }
+    movQuery += ' WHERE ' + conds.join(' AND ');
     movQuery += ' ORDER BY m.fecha DESC, m.id DESC';
     const [movimientos] = await pool.query(movQuery, movParams);
 
-    const resumen = await calcularResumen(rango);
+    const resumen = await calcularResumen(rango, sucursal);
 
     res.json({ categorias, movimientos, resumen });
   } catch (err) {
@@ -107,10 +112,11 @@ router.get('/', requireAuth, requireRole('admin'), async (req, res) => {
   }
 });
 
-//Crea un movimiento contable (inversión o gasto)
+//Crea un movimiento contable (inversión o gasto) de un local
 router.post('/', requireAuth, requireRole('admin'), async (req, res) => {
   try {
     const { fecha, tipo, categoria_id, descripcion, monto, es_diario } = req.body;
+    const sucursal = validaSucursal(req.body.sucursal);
     if (!TIPOS.includes(tipo)) return res.status(400).json({ error: 'Tipo inválido' });
     const montoN = Number(monto);
     if (Number.isNaN(montoN) || montoN < 0) return res.status(400).json({ error: 'Monto inválido' });
@@ -137,9 +143,9 @@ router.post('/', requireAuth, requireRole('admin'), async (req, res) => {
 
     const fechaReg = fecha || hoyLocal();
     const [result] = await pool.query(
-      `INSERT INTO contabilidad (fecha, tipo, categoria_id, descripcion, monto, es_diario, usuario_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      [fechaReg, tipo, catId, descripcion || '', montoN, es_diario ? 1 : 0, req.user.id]
+      `INSERT INTO contabilidad (fecha, tipo, categoria_id, descripcion, monto, es_diario, usuario_id, sucursal)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [fechaReg, tipo, catId, descripcion || '', montoN, es_diario ? 1 : 0, req.user.id, sucursal]
     );
     res.status(201).json({ ok: true, id: result.insertId });
   } catch (err) {
@@ -216,23 +222,22 @@ router.delete('/:id(\\d+)', requireAuth, requireRole('admin'), async (req, res) 
   }
 });
 
-async function calcularResumen(rango) {
-  const filtro = rango ? ' WHERE fecha >= ? AND fecha <= ?' : '';
-  const filtroAnd = rango ? ' AND fecha >= ? AND fecha <= ?' : '';
-  const invParams = rango ? [rango.inicio, rango.fin] : [];
-  const ventaParams = rango ? [rango.inicio, rango.fin] : [];
+async function calcularResumen(rango, sucursal) {
+  const filtro = rango ? ' AND fecha >= ? AND fecha <= ?' : '';
+  const invParams = rango ? [sucursal, rango.inicio, rango.fin] : [sucursal];
+  const ventaParams = rango ? [rango.inicio, rango.fin, sucursal] : [sucursal];
 
   const [[inv]] = await pool.query(
-    `SELECT COALESCE(SUM(monto),0) AS total FROM contabilidad WHERE tipo = 'inversion'${filtroAnd}`,
+    `SELECT COALESCE(SUM(monto),0) AS total FROM contabilidad WHERE tipo = 'inversion' AND sucursal = ?${filtro}`,
     invParams
   );
   const [[gas]] = await pool.query(
     `SELECT COALESCE(SUM(monto),0) AS total, COALESCE(SUM(CASE WHEN es_diario = 1 THEN monto ELSE 0 END),0) AS diarios
-     FROM contabilidad WHERE tipo = 'gasto'${filtroAnd}`,
+     FROM contabilidad WHERE tipo = 'gasto' AND sucursal = ?${filtro}`,
     invParams
   );
   const [[ventas]] = await pool.query(
-    `SELECT COALESCE(SUM(total),0) AS total FROM ventas${filtro}`,
+    `SELECT COALESCE(SUM(total),0) AS total FROM ventas WHERE sucursal = ?${filtro}`,
     ventaParams
   );
   const totalInversion = Number(inv.total);
@@ -247,27 +252,27 @@ async function calcularResumen(rango) {
     totalVentas,
     balance,
     //Desglose por categoría para gráficos
-    porCategoria: await porCategoria(rango),
+    porCategoria: await porCategoria(rango, sucursal),
     //Flujo diario: ventas vs gastos vs inversión por día
-    diario: await diarioFlujo(rango),
+    diario: await diarioFlujo(rango, sucursal),
   };
 }
 
-async function diarioFlujo(rango) {
-  const filtro = rango ? ' WHERE fecha >= ? AND fecha <= ?' : '';
-  const paramsV = rango ? [rango.inicio, rango.fin] : [];
-  const paramsC = rango ? [rango.inicio, rango.fin] : [];
+async function diarioFlujo(rango, sucursal) {
+  const filtro = rango ? ' AND fecha >= ? AND fecha <= ?' : '';
+  const paramsV = rango ? [rango.inicio, rango.fin, sucursal] : [sucursal];
+  const paramsC = rango ? [sucursal, rango.inicio, rango.fin] : [sucursal];
 
   const [ventasDia] = await pool.query(
     `SELECT fecha, COUNT(*) AS cantidad, COALESCE(SUM(total),0) AS ventas
-     FROM ventas${filtro} GROUP BY fecha`,
+     FROM ventas WHERE sucursal = ?${filtro} GROUP BY fecha`,
     paramsV
   );
   const [contaDia] = await pool.query(
     `SELECT fecha,
        COALESCE(SUM(CASE WHEN tipo = 'gasto' THEN monto ELSE 0 END),0) AS gastos,
        COALESCE(SUM(CASE WHEN tipo = 'inversion' THEN monto ELSE 0 END),0) AS inversion
-     FROM contabilidad${filtro} GROUP BY fecha`,
+     FROM contabilidad WHERE sucursal = ?${filtro} GROUP BY fecha`,
     paramsC
   );
 
@@ -287,14 +292,14 @@ async function diarioFlujo(rango) {
     .sort((a, b) => a.fecha > b.fecha ? -1 : 1);
 }
 
-async function porCategoria(rango) {
-  const filtro = rango ? ' WHERE m.fecha >= ? AND m.fecha <= ?' : '';
-  const params = rango ? [rango.inicio, rango.fin] : [];
+async function porCategoria(rango, sucursal) {
+  const filtro = rango ? ' AND m.fecha >= ? AND m.fecha <= ?' : '';
+  const params = rango ? [sucursal, rango.inicio, rango.fin] : [sucursal];
   const [rows] = await pool.query(
     `SELECT c.nombre AS categoria, c.color, m.tipo, SUM(m.monto) AS total
      FROM contabilidad m
      LEFT JOIN contabilidad_categorias c ON c.id = m.categoria_id
-     ${filtro}
+     WHERE m.sucursal = ?${filtro}
      GROUP BY c.nombre, c.color, m.tipo
      ORDER BY total DESC`,
     params

@@ -315,8 +315,9 @@ router.get('/analytics', requireAuth, requireRole('admin'), async (req, res) => 
     const startMesAnt = new Date(anio, hoyDate.getMonth() - 1, 1);
     const endMesAnt = new Date(anio, hoyDate.getMonth(), 0);
 
+    const sucursal = validaSucursal(req.query.sucursal);
     const all = await pool.query(
-      `SELECT DATE_FORMAT(v.fecha,'%Y-%m-%d') AS fecha, v.producto, v.cantidad, v.total, v.metodo_pago, v.comentario, v.grupo_id, v.detalles_pago, u.nombre AS vendedor FROM ventas v JOIN usuarios u ON u.id = v.vendedor_id WHERE v.fecha >= ?`, [s12m]
+      `SELECT DATE_FORMAT(v.fecha,'%Y-%m-%d') AS fecha, v.producto, v.cantidad, v.total, v.metodo_pago, v.comentario, v.grupo_id, v.detalles_pago, u.nombre AS vendedor FROM ventas v JOIN usuarios u ON u.id = v.vendedor_id WHERE v.fecha >= ? AND v.sucursal = ?`, [s12m, sucursal]
     );
     const rows = all[0];
 
@@ -351,7 +352,7 @@ router.get('/analytics', requireAuth, requireRole('admin'), async (req, res) => 
     const prodTotal = rows.reduce((m, r) => { m[r.producto] = (m[r.producto]||0) + Number(r.total); return m; }, {});
     const topProductos = Object.entries(prodMap).sort((a,b) => b[1]-a[1]).slice(0,10).map(([k,v]) => ({ producto: k, vendidos: v }));
     const bottomProductos = Object.entries(prodMap).sort((a,b) => a[1]-b[1]).slice(0,10).map(([k,v]) => ({ producto: k, vendidos: v }));
-    const catData = await pool.query('SELECT nombre, stock FROM categorias ORDER BY nombre');
+    const catData = await pool.query('SELECT nombre, stock FROM categorias WHERE sucursal = ? ORDER BY nombre', [sucursal]);
     const categorias = catData[0];
     const rotacionProductos = categorias.map(c => ({ producto: c.nombre, stock: c.stock, vendidos: prodMap[c.nombre] || 0 }));
     const productosSinMovimiento = rotacionProductos.filter(p => p.vendidos === 0).map(p => p.producto);
@@ -422,14 +423,14 @@ router.delete('/:id(\\d+)', requireAuth, requireRole('admin', 'vendedor'), async
   try {
     const id = Number(req.params.id);
     conn = await pool.getConnection();
-    const [rows] = await conn.query('SELECT producto, cantidad FROM ventas WHERE id = ?', [id]);
+    const [rows] = await conn.query('SELECT producto, cantidad, sucursal FROM ventas WHERE id = ?', [id]);
     if (!rows.length) {
       conn.release();
       return res.status(404).json({ error: 'Venta no encontrada' });
     }
-    const { producto, cantidad } = rows[0];
+    const { producto, cantidad, sucursal } = rows[0];
     await conn.beginTransaction();
-    await conn.query('UPDATE categorias SET stock = stock + ? WHERE nombre = ?', [cantidad, producto]);
+    await conn.query('UPDATE categorias SET stock = stock + ? WHERE nombre = ? AND sucursal = ?', [cantidad, producto, sucursal]);
     await conn.query('DELETE FROM ventas WHERE id = ?', [id]);
     await conn.commit();
     conn.release();
