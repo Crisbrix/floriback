@@ -22,18 +22,42 @@ router.post('/sell-cart', requireAuth, requireRole('admin', 'vendedor'), async (
   let conn;
   try {
     conn = await pool.getConnection();
-    const { items, metodo_pago, total = 0, recibido = 0 } = req.body;
+    const { items, metodo_pago, total = 0, recibido = 0, pagos } = req.body;
     if (!items || !items.length) {
       conn.release(); conn = null;
       return res.status(400).json({ error: 'Carrito vacío' });
     }
-    if (!['efectivo','tarjeta','nequi','daviplata','addi'].includes(metodo_pago)) {
+    if (!['efectivo','tarjeta','nequi','daviplata','addi','combinado'].includes(metodo_pago)) {
       conn.release(); conn = null;
       return res.status(400).json({ error: 'Método de pago inválido' });
     }
+
+    //Pago combinado: varios tramos por método que deben sumar el total
+    let esCombinado = metodo_pago === 'combinado';
+    let detallesPago = null;
+    if (esCombinado) {
+      if (!Array.isArray(pagos) || pagos.length < 2) {
+        conn.release(); conn = null;
+        return res.status(400).json({ error: 'Debes indicar al menos dos métodos para el pago combinado' });
+      }
+      for (const p of pagos) {
+        if (!['efectivo','tarjeta','nequi','daviplata','addi'].includes(p.metodo)) {
+          conn.release(); conn = null;
+          return res.status(400).json({ error: `Método inválido en pago combinado: ${p.metodo}` });
+        }
+      }
+      const sumaPagos = pagos.reduce((s, p) => s + Number(p.monto), 0);
+      if (Math.abs(sumaPagos - Number(total)) > 0.01) {
+        conn.release(); conn = null;
+        return res.status(400).json({ error: 'La suma de los pagos no coincide con el total' });
+      }
+      detallesPago = JSON.stringify(pagos);
+    }
+
     await conn.beginTransaction();
 
-    const cambio = Math.max(0, Number(recibido) - Number(total));
+    const cambio = esCombinado ? 0 : Math.max(0, Number(recibido) - Number(total));
+    const recibidoFinal = esCombinado ? Number(total) : Number(recibido);
     const grupoId = crypto.randomUUID();
     for (let i = 0; i < items.length; i++) {
       const { name: nombre, quantity: cantidad, comentario = '' } = items[i];
@@ -48,12 +72,13 @@ router.post('/sell-cart', requireAuth, requireRole('admin', 'vendedor'), async (
       }
       await conn.query('UPDATE categorias SET stock = stock - ? WHERE nombre = ?', [cantidad, nombre]);
       const t = i === 0 ? total : 0;
-      const r = i === 0 ? recibido : 0;
+      const r = i === 0 ? recibidoFinal : 0;
       const c = i === 0 ? cambio : 0;
+      const det = esCombinado && i === 0 ? detallesPago : null;
       await conn.query(
-        `INSERT INTO ventas (producto, cliente, cantidad, total, recibido, cambio, metodo_pago, fecha, vendedor_id, comentario, grupo_id)
-         VALUES (?, 'Cliente', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [nombre, cantidad, t, r, c, metodo_pago, hoyLocal(), req.user.id, comentario, grupoId]
+        `INSERT INTO ventas (producto, cliente, cantidad, total, recibido, cambio, metodo_pago, fecha, vendedor_id, comentario, grupo_id, detalles_pago)
+         VALUES (?, 'Cliente', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [nombre, cantidad, t, r, c, metodo_pago, hoyLocal(), req.user.id, comentario, grupoId, det]
       );
     }
 

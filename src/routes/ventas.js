@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { pool, hoyLocal } from '../db.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
+import { expandirMetodos } from '../lib/pagos.js';
 
 const router = Router();
 
@@ -72,10 +73,10 @@ router.get('/stats', requireAuth, requireRole('admin', 'vendedor'), async (req, 
        FROM ventas GROUP BY fecha ORDER BY fecha DESC LIMIT 30`
     );
 
-    const [metodos] = await pool.query(
-      `SELECT metodo_pago, COUNT(*) AS cantidad, COALESCE(SUM(total),0) AS total
-       FROM ventas GROUP BY metodo_pago`
+    const [rowsMetodos] = await pool.query(
+      `SELECT metodo_pago, total, detalles_pago, grupo_id FROM ventas`
     );
+    const metodos = expandirMetodos(rowsMetodos);
 
     const [topProductos] = await pool.query(
       `SELECT producto, SUM(cantidad) AS vendidos
@@ -177,11 +178,12 @@ router.get('/cierre', requireAuth, requireRole('admin', 'vendedor'), async (req,
       esAdmin ? [hoy] : [hoy, req.user.id]
     );
 
-    const [metodos] = await pool.query(
-      `SELECT metodo_pago, COUNT(*) AS cantidad, COALESCE(SUM(total),0) AS total
-       FROM ventas WHERE fecha = ? ${filtroUsuario} GROUP BY metodo_pago ORDER BY total DESC`,
+    const [rowsMetodos] = await pool.query(
+      `SELECT metodo_pago, total, detalles_pago, grupo_id
+       FROM ventas WHERE fecha = ? ${filtroUsuario}`,
       esAdmin ? [hoy] : [hoy, req.user.id]
     );
+    const metodos = expandirMetodos(rowsMetodos).sort((a, b) => b.total - a.total);
 
     res.json({
       fecha: new Date().toISOString().slice(0, 10),
@@ -256,11 +258,12 @@ router.get('/informe-mensual', requireAuth, requireRole('admin'), async (req, re
       [inicio, fin]
     );
 
-    const [porMetodo] = await pool.query(
-      `SELECT metodo_pago, COUNT(*) AS cantidad, COALESCE(SUM(total),0) AS total
-       FROM ventas WHERE fecha >= ? AND fecha <= ? GROUP BY metodo_pago ORDER BY total DESC`,
+    const [rowsMetodos] = await pool.query(
+      `SELECT metodo_pago, total, detalles_pago, grupo_id
+       FROM ventas WHERE fecha >= ? AND fecha <= ?`,
       [inicio, fin]
     );
+    const porMetodo = expandirMetodos(rowsMetodos).sort((a, b) => b.total - a.total);
 
     const [diario] = await pool.query(
       `SELECT fecha, COUNT(*) AS cantidad, COALESCE(SUM(total),0) AS ingresos
@@ -295,7 +298,7 @@ router.get('/analytics', requireAuth, requireRole('admin'), async (req, res) => 
     const endMesAnt = new Date(anio, hoyDate.getMonth(), 0);
 
     const all = await pool.query(
-      `SELECT DATE_FORMAT(v.fecha,'%Y-%m-%d') AS fecha, v.producto, v.cantidad, v.total, v.metodo_pago, v.comentario, v.grupo_id, u.nombre AS vendedor FROM ventas v JOIN usuarios u ON u.id = v.vendedor_id WHERE v.fecha >= ?`, [s12m]
+      `SELECT DATE_FORMAT(v.fecha,'%Y-%m-%d') AS fecha, v.producto, v.cantidad, v.total, v.metodo_pago, v.comentario, v.grupo_id, v.detalles_pago, u.nombre AS vendedor FROM ventas v JOIN usuarios u ON u.id = v.vendedor_id WHERE v.fecha >= ?`, [s12m]
     );
     const rows = all[0];
 
@@ -325,7 +328,7 @@ router.get('/analytics', requireAuth, requireRole('admin'), async (req, res) => 
       return acc;
     }, {});
     const ventasDiaSemana = Object.values(vds).sort((a,b) => diasSemana.indexOf(a.dia) - diasSemana.indexOf(b.dia));
-    const distribucionMetodos = Object.entries(rows.reduce((map, r) => { map[r.metodo_pago] = (map[r.metodo_pago]||0) + Number(r.total); return map; }, {})).map(([k,v]) => ({ metodo_pago: k, total: v }));
+    const distribucionMetodos = expandirMetodos(rows.map(r => ({ metodo_pago: r.metodo_pago, total: r.total, detalles_pago: r.detalles_pago, grupo_id: r.grupo_id })));
     const prodMap = rows.reduce((m, r) => { m[r.producto] = (m[r.producto]||0) + r.cantidad; return m; }, {});
     const prodTotal = rows.reduce((m, r) => { m[r.producto] = (m[r.producto]||0) + Number(r.total); return m; }, {});
     const topProductos = Object.entries(prodMap).sort((a,b) => b[1]-a[1]).slice(0,10).map(([k,v]) => ({ producto: k, vendidos: v }));
