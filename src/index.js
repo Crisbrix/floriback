@@ -10,6 +10,7 @@ import ventaRoutes from './routes/ventas.js';
 import categoriaRoutes from './routes/categorias.js';
 import apartadoRoutes from './routes/apartados.js';
 import melsusRoutes from './routes/melsus.js';
+import contabilidadRoutes from './routes/contabilidad.js';
 import uploadRoutes from './routes/upload.js';
 
 const app = express();
@@ -34,6 +35,7 @@ app.use('/api/ventas', ventaRoutes);
 app.use('/api/categorias', categoriaRoutes);
 app.use('/api/apartados', apartadoRoutes);
 app.use('/api/melsus', melsusRoutes);
+app.use('/api/contabilidad', contabilidadRoutes);
 app.use('/api/upload', uploadRoutes);
 
 app.get('/api/health', (_req, res) => {
