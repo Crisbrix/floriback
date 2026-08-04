@@ -218,16 +218,17 @@ router.delete('/:id(\\d+)', requireAuth, requireRole('admin'), async (req, res) 
 
 async function calcularResumen(rango) {
   const filtro = rango ? ' WHERE fecha >= ? AND fecha <= ?' : '';
+  const filtroAnd = rango ? ' AND fecha >= ? AND fecha <= ?' : '';
   const invParams = rango ? [rango.inicio, rango.fin] : [];
   const ventaParams = rango ? [rango.inicio, rango.fin] : [];
 
   const [[inv]] = await pool.query(
-    `SELECT COALESCE(SUM(monto),0) AS total FROM contabilidad WHERE tipo = 'inversion'${filtro}`,
+    `SELECT COALESCE(SUM(monto),0) AS total FROM contabilidad WHERE tipo = 'inversion'${filtroAnd}`,
     invParams
   );
   const [[gas]] = await pool.query(
     `SELECT COALESCE(SUM(monto),0) AS total, COALESCE(SUM(CASE WHEN es_diario = 1 THEN monto ELSE 0 END),0) AS diarios
-     FROM contabilidad WHERE tipo = 'gasto'${filtro}`,
+     FROM contabilidad WHERE tipo = 'gasto'${filtroAnd}`,
     invParams
   );
   const [[ventas]] = await pool.query(
