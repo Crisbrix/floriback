@@ -2,34 +2,37 @@ import { Router } from 'express';
 import { pool, hoyLocal } from '../db.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
 import { expandirMetodos } from '../lib/pagos.js';
+import { validaSucursal } from '../lib/sucursal.js';
 
 const router = Router();
 
-//Lista ventas, opcionalmente filtradas por fecha
+//Lista ventas, opcionalmente filtradas por fecha y local
 router.get('/', requireAuth, requireRole('admin', 'vendedor'), async (req, res) => {
   try {
     const { fecha } = req.query;
+    const sucursal = validaSucursal(req.query.sucursal);
     let query, params;
     if (fecha) {
       query = `SELECT v.id, v.producto AS productName, v.cliente AS customer,
                v.cantidad AS quantity, v.total, v.recibido, v.cambio,
                v.metodo_pago AS paymentMethod, v.fecha AS date, u.nombre AS vendedor,
-               v.comentario, v.grupo_id AS grupoId
+               v.comentario, v.grupo_id AS grupoId, v.sucursal
         FROM ventas v
         JOIN usuarios u ON u.id = v.vendedor_id
-        WHERE v.fecha = ?
+        WHERE v.fecha = ? AND v.sucursal = ?
         ORDER BY v.id ASC`;
-      params = [fecha];
+      params = [fecha, sucursal];
     } else {
       query = `SELECT v.id, v.producto AS productName, v.cliente AS customer,
                v.cantidad AS quantity, v.total, v.recibido, v.cambio,
                v.metodo_pago AS paymentMethod, v.fecha AS date, u.nombre AS vendedor,
-               v.comentario, v.grupo_id AS grupoId
+               v.comentario, v.grupo_id AS grupoId, v.sucursal
         FROM ventas v
         JOIN usuarios u ON u.id = v.vendedor_id
+        WHERE v.sucursal = ?
         ORDER BY v.fecha DESC, v.id DESC
         LIMIT 100`;
-      params = [];
+      params = [sucursal];
     }
     const [rows] = await pool.query(query, params);
     res.json(rows);
@@ -42,17 +45,18 @@ router.get('/', requireAuth, requireRole('admin', 'vendedor'), async (req, res) 
 router.get('/vendedor', requireAuth, requireRole('admin'), async (req, res) => {
   try {
     const { nombre, fecha } = req.query;
+    const sucursal = validaSucursal(req.query.sucursal);
     if (!nombre || !fecha) return res.status(400).json({ error: 'nombre y fecha requeridos' });
     const [rows] = await pool.query(
       `SELECT v.id, v.producto AS productName, v.cliente AS customer,
               v.cantidad AS quantity, v.total, v.recibido, v.cambio,
               v.metodo_pago AS paymentMethod, v.fecha AS date, u.nombre AS vendedor,
-              v.comentario, v.grupo_id AS grupoId
+              v.comentario, v.grupo_id AS grupoId, v.sucursal
        FROM ventas v
        JOIN usuarios u ON u.id = v.vendedor_id
-       WHERE u.nombre = ? AND v.fecha = ?
+       WHERE u.nombre = ? AND v.fecha = ? AND v.sucursal = ?
        ORDER BY v.id ASC`,
-      [nombre, fecha]
+      [nombre, fecha, sucursal]
     );
     res.json(rows);
   } catch (err) {
@@ -60,53 +64,59 @@ router.get('/vendedor', requireAuth, requireRole('admin'), async (req, res) => {
   }
 });
 
-//Estadisticas globales (dashboard)
+//Estadisticas globales (dashboard) por local
 router.get('/stats', requireAuth, requireRole('admin', 'vendedor'), async (req, res) => {
   try {
-    const [ventas] = await pool.query('SELECT COUNT(*) AS total, COALESCE(SUM(total),0) AS monto FROM ventas');
-    const [prod] = await pool.query('SELECT COUNT(*) AS total FROM productos');
+    const sucursal = validaSucursal(req.query.sucursal);
+    const [ventas] = await pool.query('SELECT COUNT(*) AS total, COALESCE(SUM(total),0) AS monto FROM ventas WHERE sucursal = ?', [sucursal]);
+    const [prod] = await pool.query('SELECT COUNT(*) AS total FROM productos WHERE sucursal = ?', [sucursal]);
     const [usr] = await pool.query('SELECT COUNT(*) AS total FROM usuarios');
-    const [cat] = await pool.query('SELECT COUNT(*) AS total FROM categorias');
+    const [cat] = await pool.query('SELECT COUNT(*) AS total FROM categorias WHERE sucursal = ?', [sucursal]);
 
     const [ventasDia] = await pool.query(
       `SELECT fecha, COUNT(*) AS cantidad, COALESCE(SUM(total),0) AS ingresos
-       FROM ventas GROUP BY fecha ORDER BY fecha DESC LIMIT 30`
+       FROM ventas WHERE sucursal = ? GROUP BY fecha ORDER BY fecha DESC LIMIT 30`,
+      [sucursal]
     );
 
     const [rowsMetodos] = await pool.query(
-      `SELECT metodo_pago, total, detalles_pago, grupo_id FROM ventas`
+      `SELECT metodo_pago, total, detalles_pago, grupo_id FROM ventas WHERE sucursal = ?`,
+      [sucursal]
     );
     const metodos = expandirMetodos(rowsMetodos);
 
     const [topProductos] = await pool.query(
       `SELECT producto, SUM(cantidad) AS vendidos
-       FROM ventas GROUP BY producto ORDER BY vendidos DESC LIMIT 10`
+       FROM ventas WHERE sucursal = ? GROUP BY producto ORDER BY vendidos DESC LIMIT 10`,
+      [sucursal]
     );
 
     const [inventario] = await pool.query(
       `SELECT c.nombre, c.stock,
-        COALESCE((SELECT SUM(v.cantidad) FROM ventas v WHERE v.producto = c.nombre), 0) AS vendidos
-       FROM categorias c ORDER BY c.stock ASC`
+        COALESCE((SELECT SUM(v.cantidad) FROM ventas v WHERE v.producto = c.nombre AND v.sucursal = c.sucursal), 0) AS vendidos
+       FROM categorias c WHERE c.sucursal = ? ORDER BY c.stock ASC`,
+      [sucursal]
     );
 
     const [stockBajo] = await pool.query(
-      `SELECT COUNT(*) AS total FROM categorias WHERE stock <= 3`
+      `SELECT COUNT(*) AS total FROM categorias WHERE sucursal = ? AND stock <= 3`,
+      [sucursal]
     );
 
     const [ventasHoy] = await pool.query(
       `SELECT COUNT(*) AS cantidad, COALESCE(SUM(total),0) AS ingresos
-       FROM ventas WHERE fecha = ?`,
-      [hoyLocal()]
+       FROM ventas WHERE fecha = ? AND sucursal = ?`,
+      [hoyLocal(), sucursal]
     );
 
     const [ventasPorVendedor] = await pool.query(
       `SELECT u.nombre AS vendedor, COUNT(*) AS ventas, COALESCE(SUM(v.total),0) AS total
        FROM ventas v
        JOIN usuarios u ON u.id = v.vendedor_id
-       WHERE v.fecha = ?
+       WHERE v.fecha = ? AND v.sucursal = ?
        GROUP BY v.vendedor_id, u.nombre
        ORDER BY total DESC`,
-      [hoyLocal()]
+      [hoyLocal(), sucursal]
     );
 
     res.json({
@@ -131,62 +141,65 @@ router.get('/stats', requireAuth, requireRole('admin', 'vendedor'), async (req, 
   }
 });
 
-//Abre caja del dia
+//Abre caja del dia (por local)
 router.post('/caja/abrir', requireAuth, requireRole('admin', 'vendedor'), async (req, res) => {
   try {
+    const sucursal = validaSucursal(req.body.sucursal);
     const hoy = hoyLocal();
-    await pool.query('INSERT INTO aperturas_caja (fecha, abierto_por) VALUES (?, ?)', [hoy, req.user.id]);
-    res.json({ ok: true, fecha: hoy });
+    await pool.query('INSERT INTO aperturas_caja (fecha, abierto_por, sucursal) VALUES (?, ?, ?)', [hoy, req.user.id, sucursal]);
+    res.json({ ok: true, fecha: hoy, sucursal });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-//Estado del cierre: ventas del dia, resumen, metodos, confirmado
+//Estado del cierre: ventas del dia, resumen, metodos, confirmado (por local)
 router.get('/cierre', requireAuth, requireRole('admin', 'vendedor'), async (req, res) => {
   try {
+    const sucursal = validaSucursal(req.query.sucursal);
     const hoy = hoyLocal();
     const esAdmin = req.user.role === 'admin';
     const filtroUsuario = esAdmin ? '' : 'AND vendedor_id = ?';
 
     const [[confirmado]] = await pool.query(
-      'SELECT id, confirmado_por, confirmado_en FROM cierres WHERE fecha = ?',
-      [hoy]
+      'SELECT id, confirmado_por, confirmado_en FROM cierres WHERE fecha = ? AND sucursal = ?',
+      [hoy, sucursal]
     );
 
     const [[apertura]] = await pool.query(
-      'SELECT id, abierto_por, abierto_en FROM aperturas_caja WHERE fecha = ? LIMIT 1',
-      [hoy]
+      'SELECT id, abierto_por, abierto_en FROM aperturas_caja WHERE fecha = ? AND sucursal = ? LIMIT 1',
+      [hoy, sucursal]
     );
 
-    const paramsVentas = esAdmin ? [hoy] : [hoy, req.user.id];
+    const paramsVentas = esAdmin ? [hoy, sucursal] : [hoy, sucursal, req.user.id];
     const [ventas] = await pool.query(
       `SELECT v.id, v.producto AS productName, v.cliente AS customer,
                v.cantidad AS quantity, v.total, v.recibido, v.cambio,
                v.metodo_pago AS paymentMethod, v.fecha AS date, u.nombre AS vendedor,
-               v.comentario, v.grupo_id AS grupoId
+               v.comentario, v.grupo_id AS grupoId, v.sucursal
         FROM ventas v
         JOIN usuarios u ON u.id = v.vendedor_id
-        WHERE v.fecha = ? ${esAdmin ? '' : 'AND v.vendedor_id = ?'}
+        WHERE v.fecha = ? AND v.sucursal = ? ${esAdmin ? '' : 'AND v.vendedor_id = ?'}
         ORDER BY v.id ASC`,
       paramsVentas
     );
 
     const [resumen] = await pool.query(
       `SELECT COUNT(*) AS transacciones, COALESCE(SUM(cantidad),0) AS articulos, COALESCE(SUM(total),0) AS total
-       FROM ventas WHERE fecha = ? ${filtroUsuario}`,
-      esAdmin ? [hoy] : [hoy, req.user.id]
+       FROM ventas WHERE fecha = ? AND sucursal = ? ${filtroUsuario}`,
+      esAdmin ? [hoy, sucursal] : [hoy, sucursal, req.user.id]
     );
 
     const [rowsMetodos] = await pool.query(
       `SELECT metodo_pago, total, detalles_pago, grupo_id
-       FROM ventas WHERE fecha = ? ${filtroUsuario}`,
-      esAdmin ? [hoy] : [hoy, req.user.id]
+       FROM ventas WHERE fecha = ? AND sucursal = ? ${filtroUsuario}`,
+      esAdmin ? [hoy, sucursal] : [hoy, sucursal, req.user.id]
     );
     const metodos = expandirMetodos(rowsMetodos).sort((a, b) => b.total - a.total);
 
     res.json({
       fecha: new Date().toISOString().slice(0, 10),
+      sucursal,
       usuario: req.user.nombre,
       rol: req.user.role,
       confirmado: !!confirmado,
@@ -200,33 +213,37 @@ router.get('/cierre', requireAuth, requireRole('admin', 'vendedor'), async (req,
   }
 });
 
-//Confirma cierre de caja del dia (admin)
+//Confirma cierre de caja del dia (admin, por local)
 router.post('/cierre/confirmar', requireAuth, requireRole('admin'), async (req, res) => {
   try {
+    const sucursal = validaSucursal(req.body.sucursal);
     const hoy = hoyLocal();
     await pool.query(
-      'INSERT INTO cierres (fecha, confirmado_por) VALUES (?, ?) ON DUPLICATE KEY UPDATE confirmado_por = VALUES(confirmado_por), confirmado_en = CURRENT_TIMESTAMP',
-      [hoy, req.user.id]
+      'INSERT INTO cierres (fecha, confirmado_por, sucursal) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE confirmado_por = VALUES(confirmado_por), confirmado_en = CURRENT_TIMESTAMP',
+      [hoy, req.user.id, sucursal]
     );
-    res.json({ ok: true, fecha: hoy });
+    res.json({ ok: true, fecha: hoy, sucursal });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-//Historial de cierres con ventas agregadas
+//Historial de cierres con ventas agregadas (por local)
 router.get('/cierres', requireAuth, requireRole('admin'), async (req, res) => {
   try {
+    const sucursal = validaSucursal(req.query.sucursal);
     const [rows] = await pool.query(
-      `SELECT c.id, c.fecha, c.confirmado_en, u.nombre AS confirmado_por,
+      `SELECT c.id, c.fecha, c.sucursal, c.confirmado_en, u.nombre AS confirmado_por,
               COALESCE(v.ventas, 0) AS ventas, COALESCE(v.articulos, 0) AS articulos, COALESCE(v.total, 0) AS total
        FROM cierres c
        JOIN usuarios u ON u.id = c.confirmado_por
        LEFT JOIN (
-         SELECT fecha, COUNT(*) AS ventas, SUM(cantidad) AS articulos, SUM(total) AS total
-         FROM ventas GROUP BY fecha
-       ) v ON v.fecha = c.fecha
-       ORDER BY c.fecha DESC`
+         SELECT fecha, sucursal, COUNT(*) AS ventas, SUM(cantidad) AS articulos, SUM(total) AS total
+         FROM ventas GROUP BY fecha, sucursal
+       ) v ON v.fecha = c.fecha AND v.sucursal = c.sucursal
+       WHERE c.sucursal = ?
+       ORDER BY c.fecha DESC`,
+      [sucursal]
     );
     res.json(rows);
   } catch (err) {
@@ -234,10 +251,11 @@ router.get('/cierres', requireAuth, requireRole('admin'), async (req, res) => {
   }
 });
 
-//Informe mensual: resumen, por vendedor, por metodo, diario
+//Informe mensual: resumen, por vendedor, por metodo, diario (por local)
 router.get('/informe-mensual', requireAuth, requireRole('admin'), async (req, res) => {
   try {
     const { mes } = req.query;
+    const sucursal = validaSucursal(req.query.sucursal);
     if (!mes || !/^\d{4}-\d{2}$/.test(mes)) return res.status(400).json({ error: 'Formato: mes=YYYY-MM' });
     const inicio = `${mes}-01`;
     const [y, m] = mes.split('-').map(Number);
@@ -246,29 +264,29 @@ router.get('/informe-mensual', requireAuth, requireRole('admin'), async (req, re
 
     const [[resumen]] = await pool.query(
       `SELECT COUNT(*) AS ventas, COALESCE(SUM(cantidad),0) AS articulos, COALESCE(SUM(total),0) AS monto
-       FROM ventas WHERE fecha >= ? AND fecha <= ?`,
-      [inicio, fin]
+       FROM ventas WHERE fecha >= ? AND fecha <= ? AND sucursal = ?`,
+      [inicio, fin, sucursal]
     );
 
     const [porVendedor] = await pool.query(
       `SELECT u.nombre AS vendedor, COUNT(*) AS ventas, COALESCE(SUM(v.total),0) AS total
        FROM ventas v JOIN usuarios u ON u.id = v.vendedor_id
-       WHERE v.fecha >= ? AND v.fecha <= ?
+       WHERE v.fecha >= ? AND v.fecha <= ? AND v.sucursal = ?
        GROUP BY v.vendedor_id, u.nombre ORDER BY total DESC`,
-      [inicio, fin]
+      [inicio, fin, sucursal]
     );
 
     const [rowsMetodos] = await pool.query(
       `SELECT metodo_pago, total, detalles_pago, grupo_id
-       FROM ventas WHERE fecha >= ? AND fecha <= ?`,
-      [inicio, fin]
+       FROM ventas WHERE fecha >= ? AND fecha <= ? AND sucursal = ?`,
+      [inicio, fin, sucursal]
     );
     const porMetodo = expandirMetodos(rowsMetodos).sort((a, b) => b.total - a.total);
 
     const [diario] = await pool.query(
       `SELECT fecha, COUNT(*) AS cantidad, COALESCE(SUM(total),0) AS ingresos
-       FROM ventas WHERE fecha >= ? AND fecha <= ? GROUP BY fecha ORDER BY fecha ASC`,
-      [inicio, fin]
+       FROM ventas WHERE fecha >= ? AND fecha <= ? AND sucursal = ? GROUP BY fecha ORDER BY fecha ASC`,
+      [inicio, fin, sucursal]
     );
 
     const efectivo = porMetodo.filter(m => m.metodo_pago === 'efectivo').reduce((s, m) => s + Number(m.total), 0);

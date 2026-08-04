@@ -2,14 +2,17 @@ import crypto from 'node:crypto';
 import { Router } from 'express';
 import { pool, hoyLocal } from '../db.js';
 import { requireAuth, requireRole } from '../middleware/auth.js';
+import { validaSucursal } from '../lib/sucursal.js';
 
 const router = Router();
 
-//Lista inventario (categorias con stock)
+//Lista inventario (categorias con stock) de un local
 router.get('/', async (req, res) => {
   try {
+    const sucursal = validaSucursal(req.query.sucursal);
     const [rows] = await pool.query(
-      'SELECT id, nombre AS name, stock, color, descripcion FROM categorias ORDER BY nombre'
+      'SELECT id, nombre AS name, stock, color, descripcion FROM categorias WHERE sucursal = ? ORDER BY nombre',
+      [sucursal]
     );
     res.json(rows);
   } catch (err) {
@@ -23,6 +26,7 @@ router.post('/sell-cart', requireAuth, requireRole('admin', 'vendedor'), async (
   try {
     conn = await pool.getConnection();
     const { items, metodo_pago, total = 0, recibido = 0, pagos } = req.body;
+    const sucursal = validaSucursal(req.body.sucursal);
     if (!items || !items.length) {
       conn.release(); conn = null;
       return res.status(400).json({ error: 'Carrito vacío' });
@@ -61,24 +65,24 @@ router.post('/sell-cart', requireAuth, requireRole('admin', 'vendedor'), async (
     const grupoId = crypto.randomUUID();
     for (let i = 0; i < items.length; i++) {
       const { name: nombre, quantity: cantidad, comentario = '' } = items[i];
-      const [rows] = await conn.query('SELECT stock FROM categorias WHERE nombre = ?', [nombre]);
+      const [rows] = await conn.query('SELECT stock FROM categorias WHERE nombre = ? AND sucursal = ?', [nombre, sucursal]);
       if (!rows.length) {
         await conn.rollback(); conn.release();
-        return res.status(404).json({ error: `Categoría ${nombre} no encontrada` });
+        return res.status(404).json({ error: `Categoría ${nombre} no encontrada en este local` });
       }
       if (rows[0].stock < cantidad) {
         await conn.rollback(); conn.release();
         return res.status(400).json({ error: `Stock insuficiente para ${nombre}` });
       }
-      await conn.query('UPDATE categorias SET stock = stock - ? WHERE nombre = ?', [cantidad, nombre]);
+      await conn.query('UPDATE categorias SET stock = stock - ? WHERE nombre = ? AND sucursal = ?', [cantidad, nombre, sucursal]);
       const t = i === 0 ? total : 0;
       const r = i === 0 ? recibidoFinal : 0;
       const c = i === 0 ? cambio : 0;
       const det = esCombinado && i === 0 ? detallesPago : null;
       await conn.query(
-        `INSERT INTO ventas (producto, cliente, cantidad, total, recibido, cambio, metodo_pago, fecha, vendedor_id, comentario, grupo_id, detalles_pago)
-         VALUES (?, 'Cliente', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [nombre, cantidad, t, r, c, metodo_pago, hoyLocal(), req.user.id, comentario, grupoId, det]
+        `INSERT INTO ventas (producto, cliente, cantidad, total, recibido, cambio, metodo_pago, fecha, vendedor_id, comentario, grupo_id, detalles_pago, sucursal)
+         VALUES (?, 'Cliente', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [nombre, cantidad, t, r, c, metodo_pago, hoyLocal(), req.user.id, comentario, grupoId, det, sucursal]
       );
     }
 
@@ -92,9 +96,10 @@ router.post('/sell-cart', requireAuth, requireRole('admin', 'vendedor'), async (
   }
 });
 
-//Actualiza stock y descripcion de una categoria
+//Actualiza stock y descripcion de una categoria (dentro de un local)
 router.patch('/:nombre', requireAuth, requireRole('admin'), async (req, res) => {
   try {
+    const sucursal = validaSucursal(req.body.sucursal);
     const { stock, descripcion } = req.body;
     if (stock !== undefined && stock < 0) {
       return res.status(400).json({ error: 'Stock inválido' });
@@ -104,8 +109,8 @@ router.patch('/:nombre', requireAuth, requireRole('admin'), async (req, res) => 
     if (stock !== undefined) { fields.push('stock = ?'); values.push(stock); }
     if (descripcion !== undefined) { fields.push('descripcion = ?'); values.push(descripcion); }
     if (!fields.length) return res.status(400).json({ error: 'Nada que actualizar' });
-    values.push(req.params.nombre);
-    await pool.query(`UPDATE categorias SET ${fields.join(', ')} WHERE nombre = ?`, values);
+    values.push(req.params.nombre, sucursal);
+    await pool.query(`UPDATE categorias SET ${fields.join(', ')} WHERE nombre = ? AND sucursal = ?`, values);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });

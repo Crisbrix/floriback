@@ -12,6 +12,10 @@ import apartadoRoutes from './routes/apartados.js';
 import melsusRoutes from './routes/melsus.js';
 import contabilidadRoutes from './routes/contabilidad.js';
 import uploadRoutes from './routes/upload.js';
+import { asegurarSucursales } from './lib/sucursal.js';
+
+//Migración automática: agrega columna sucursal a todas las tablas que la necesitan
+asegurarSucursales();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
