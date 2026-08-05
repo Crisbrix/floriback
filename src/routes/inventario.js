@@ -6,12 +6,12 @@ import { validaSucursal } from '../lib/sucursal.js';
 
 const router = Router();
 
-//Lista inventario (categorias con stock) de un local
+//Lista inventario (productos con stock) de un local
 router.get('/', async (req, res) => {
   try {
     const sucursal = validaSucursal(req.query.sucursal);
     const [rows] = await pool.query(
-      'SELECT id, nombre AS name, stock, color, descripcion FROM categorias WHERE sucursal = ? ORDER BY nombre',
+      'SELECT id, nombre AS name, stock, color, descripcion FROM productos WHERE sucursal = ? ORDER BY nombre',
       [sucursal]
     );
     res.json(rows);
@@ -65,16 +65,16 @@ router.post('/sell-cart', requireAuth, requireRole('admin', 'vendedor'), async (
     const grupoId = crypto.randomUUID();
     for (let i = 0; i < items.length; i++) {
       const { name: nombre, quantity: cantidad, comentario = '' } = items[i];
-      const [rows] = await conn.query('SELECT stock FROM categorias WHERE nombre = ? AND sucursal = ?', [nombre, sucursal]);
+      const [rows] = await conn.query('SELECT stock FROM productos WHERE nombre = ? AND sucursal = ?', [nombre, sucursal]);
       if (!rows.length) {
         await conn.rollback(); conn.release();
-        return res.status(404).json({ error: `Categoría ${nombre} no encontrada en este local` });
+        return res.status(404).json({ error: `Producto ${nombre} no encontrado en este local` });
       }
       if (rows[0].stock < cantidad) {
         await conn.rollback(); conn.release();
         return res.status(400).json({ error: `Stock insuficiente para ${nombre}` });
       }
-      await conn.query('UPDATE categorias SET stock = stock - ? WHERE nombre = ? AND sucursal = ?', [cantidad, nombre, sucursal]);
+      await conn.query('UPDATE productos SET stock = stock - ? WHERE nombre = ? AND sucursal = ?', [cantidad, nombre, sucursal]);
       const t = i === 0 ? total : 0;
       const r = i === 0 ? recibidoFinal : 0;
       const c = i === 0 ? cambio : 0;
@@ -96,7 +96,7 @@ router.post('/sell-cart', requireAuth, requireRole('admin', 'vendedor'), async (
   }
 });
 
-//Actualiza stock y descripcion de una categoria (dentro de un local)
+//Actualiza stock y descripcion de un producto (dentro de un local)
 router.patch('/:nombre', requireAuth, requireRole('admin'), async (req, res) => {
   try {
     const sucursal = validaSucursal(req.body.sucursal);
@@ -110,7 +110,7 @@ router.patch('/:nombre', requireAuth, requireRole('admin'), async (req, res) => 
     if (descripcion !== undefined) { fields.push('descripcion = ?'); values.push(descripcion); }
     if (!fields.length) return res.status(400).json({ error: 'Nada que actualizar' });
     values.push(req.params.nombre, sucursal);
-    await pool.query(`UPDATE categorias SET ${fields.join(', ')} WHERE nombre = ? AND sucursal = ?`, values);
+    await pool.query(`UPDATE productos SET ${fields.join(', ')} WHERE nombre = ? AND sucursal = ?`, values);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });

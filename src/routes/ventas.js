@@ -71,7 +71,7 @@ router.get('/stats', requireAuth, requireRole('admin', 'vendedor'), async (req, 
     const [ventas] = await pool.query('SELECT COUNT(*) AS total, COALESCE(SUM(total),0) AS monto FROM ventas WHERE sucursal = ?', [sucursal]);
     const [prod] = await pool.query('SELECT COUNT(*) AS total FROM productos WHERE sucursal = ?', [sucursal]);
     const [usr] = await pool.query('SELECT COUNT(*) AS total FROM usuarios');
-    const [cat] = await pool.query('SELECT COUNT(*) AS total FROM categorias WHERE sucursal = ?', [sucursal]);
+    const [cat] = await pool.query('SELECT COUNT(*) AS total FROM productos WHERE sucursal = ?', [sucursal]);
 
     const [ventasDia] = await pool.query(
       `SELECT fecha, COUNT(*) AS cantidad, COALESCE(SUM(total),0) AS ingresos
@@ -92,14 +92,14 @@ router.get('/stats', requireAuth, requireRole('admin', 'vendedor'), async (req, 
     );
 
     const [inventario] = await pool.query(
-      `SELECT c.nombre, c.stock,
-        COALESCE((SELECT SUM(v.cantidad) FROM ventas v WHERE v.producto = c.nombre AND v.sucursal = c.sucursal), 0) AS vendidos
-       FROM categorias c WHERE c.sucursal = ? ORDER BY c.stock ASC`,
+      `SELECT p.nombre, p.stock,
+        COALESCE((SELECT SUM(v.cantidad) FROM ventas v WHERE v.producto = p.nombre AND v.sucursal = p.sucursal), 0) AS vendidos
+       FROM productos p WHERE p.sucursal = ? ORDER BY p.stock ASC`,
       [sucursal]
     );
 
     const [stockBajo] = await pool.query(
-      `SELECT COUNT(*) AS total FROM categorias WHERE sucursal = ? AND stock <= 3`,
+      `SELECT COUNT(*) AS total FROM productos WHERE sucursal = ? AND stock <= 3`,
       [sucursal]
     );
 
@@ -352,7 +352,7 @@ router.get('/analytics', requireAuth, requireRole('admin'), async (req, res) => 
     const prodTotal = rows.reduce((m, r) => { m[r.producto] = (m[r.producto]||0) + Number(r.total); return m; }, {});
     const topProductos = Object.entries(prodMap).sort((a,b) => b[1]-a[1]).slice(0,10).map(([k,v]) => ({ producto: k, vendidos: v }));
     const bottomProductos = Object.entries(prodMap).sort((a,b) => a[1]-b[1]).slice(0,10).map(([k,v]) => ({ producto: k, vendidos: v }));
-    const catData = await pool.query('SELECT nombre, stock FROM categorias WHERE sucursal = ? ORDER BY nombre', [sucursal]);
+    const catData = await pool.query('SELECT nombre, stock FROM productos WHERE sucursal = ? ORDER BY nombre', [sucursal]);
     const categorias = catData[0];
     const rotacionProductos = categorias.map(c => ({ producto: c.nombre, stock: c.stock, vendidos: prodMap[c.nombre] || 0 }));
     const productosSinMovimiento = rotacionProductos.filter(p => p.vendidos === 0).map(p => p.producto);
@@ -430,7 +430,7 @@ router.delete('/:id(\\d+)', requireAuth, requireRole('admin', 'vendedor'), async
     }
     const { producto, cantidad, sucursal } = rows[0];
     await conn.beginTransaction();
-    await conn.query('UPDATE categorias SET stock = stock + ? WHERE nombre = ? AND sucursal = ?', [cantidad, producto, sucursal]);
+    await conn.query('UPDATE productos SET stock = stock + ? WHERE nombre = ? AND sucursal = ?', [cantidad, producto, sucursal]);
     await conn.query('DELETE FROM ventas WHERE id = ?', [id]);
     await conn.commit();
     conn.release();

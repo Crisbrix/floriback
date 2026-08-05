@@ -9,6 +9,7 @@ export function validaSucursal(s) {
 }
 
 let migracionPromise = null;
+let stockMigracionPromise = null;
 
 //Asegura que una tabla tenga la columna sucursal
 async function asegurarColumna(table) {
@@ -67,4 +68,39 @@ export function asegurarSucursales() {
     });
   }
   return migracionPromise;
+}
+
+//Migración: el stock pasa a vivir en productos (categorias queda como respaldo sin tocar)
+//Se ejecuta una sola vez: agrega stock/descripcion a productos y copia desde categorias
+export function asegurarStockEnProductos() {
+  if (!stockMigracionPromise) {
+    stockMigracionPromise = (async () => {
+      const [cols] = await pool.query(
+        `SELECT COUNT(*) AS n FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'productos' AND COLUMN_NAME = 'stock'`
+      );
+      if (cols[0].n) return;
+      await pool.query(`ALTER TABLE productos ADD COLUMN stock INT NOT NULL DEFAULT 0`);
+      await pool.query(`ALTER TABLE productos ADD COLUMN descripcion TEXT`);
+      //El producto ya no depende de categorias: suelta la FK hacia categorias
+      const [fks] = await pool.query(
+        `SELECT CONSTRAINT_NAME FROM information_schema.KEY_COLUMN_USAGE
+         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'productos'
+           AND REFERENCED_TABLE_NAME = 'categorias'`
+      );
+      for (const fk of fks) {
+        await pool.query(`ALTER TABLE productos DROP FOREIGN KEY \`${fk.CONSTRAINT_NAME}\``);
+      }
+      await pool.query(
+        `UPDATE productos p
+         JOIN categorias c ON c.nombre = p.categoria AND c.sucursal = p.sucursal
+         SET p.stock = COALESCE(c.stock, 0), p.descripcion = COALESCE(c.descripcion, '')
+         WHERE c.id IS NOT NULL`
+      );
+      console.log('stock migration: productos actualizados desde categorias');
+    })().catch(err => {
+      console.error('stock migration error:', err.message);
+    });
+  }
+  return stockMigracionPromise;
 }
