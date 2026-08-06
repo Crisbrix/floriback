@@ -63,6 +63,25 @@ export function asegurarSucursales() {
       }
       try { await recreaIndiceUnico('categorias', ['nombre', 'sucursal']); } catch {}
       try { await recreaIndiceUnico('cierres', ['fecha', 'sucursal']); } catch {}
+      //Abonos de apartados: historial de pagos con fecha y metodo (para el cierre)
+      try {
+        await pool.query(
+          `CREATE TABLE IF NOT EXISTS apartados_abono (
+             id INT AUTO_INCREMENT PRIMARY KEY,
+             apartado_id INT NOT NULL,
+             monto DECIMAL(12,0) NOT NULL DEFAULT 0,
+             metodo_pago VARCHAR(20) NOT NULL DEFAULT 'efectivo',
+             fecha DATE NOT NULL,
+             vendedor_id INT NOT NULL,
+             sucursal VARCHAR(20) NOT NULL DEFAULT 'floripondia',
+             creado_en DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+             INDEX idx_aa_apartado (apartado_id),
+             INDEX idx_aa_fecha_suc (fecha, sucursal)
+           ) ENGINE=InnoDB`
+        );
+      } catch (err) {
+        console.error('abonos migration error:', err.message);
+      }
     })().catch(err => {
       console.error('sucursal migration error:', err.message);
     });

@@ -197,6 +197,17 @@ router.get('/cierre', requireAuth, requireRole('admin', 'vendedor'), async (req,
     );
     const metodos = expandirMetodos(rowsMetodos).sort((a, b) => b.total - a.total);
 
+    //Plata recibida de apartados (abonos) en el día
+    const filtroAbono = esAdmin ? '' : 'AND vendedor_id = ?';
+    const paramsAbono = esAdmin ? [hoy, sucursal] : [hoy, sucursal, req.user.id];
+    const [rowsAbonos] = await pool.query(
+      `SELECT metodo_pago, SUM(monto) AS total FROM apartados_abono
+       WHERE fecha = ? AND sucursal = ? ${filtroAbono} GROUP BY metodo_pago
+       ORDER BY total DESC`,
+      paramsAbono
+    );
+    const abonosTotal = rowsAbonos.reduce((s, r) => s + (Number(r.total) || 0), 0);
+
     res.json({
       fecha: new Date().toISOString().slice(0, 10),
       sucursal,
@@ -206,6 +217,7 @@ router.get('/cierre', requireAuth, requireRole('admin', 'vendedor'), async (req,
       cajaAbierta: !!apertura,
       resumen: resumen[0],
       metodos,
+      apartados: { total: abonosTotal, metodos: rowsAbonos },
       ventas,
     });
   } catch (err) {
@@ -234,13 +246,18 @@ router.get('/cierres', requireAuth, requireRole('admin'), async (req, res) => {
     const sucursal = validaSucursal(req.query.sucursal);
     const [rows] = await pool.query(
       `SELECT c.id, c.fecha, c.sucursal, c.confirmado_en, u.nombre AS confirmado_por,
-              COALESCE(v.ventas, 0) AS ventas, COALESCE(v.articulos, 0) AS articulos, COALESCE(v.total, 0) AS total
+              COALESCE(v.ventas, 0) AS ventas, COALESCE(v.articulos, 0) AS articulos, COALESCE(v.total, 0) AS total,
+              COALESCE(aa.total, 0) AS apartados
        FROM cierres c
        JOIN usuarios u ON u.id = c.confirmado_por
        LEFT JOIN (
          SELECT fecha, sucursal, COUNT(*) AS ventas, SUM(cantidad) AS articulos, SUM(total) AS total
          FROM ventas GROUP BY fecha, sucursal
        ) v ON v.fecha = c.fecha AND v.sucursal = c.sucursal
+       LEFT JOIN (
+         SELECT fecha, sucursal, SUM(monto) AS total
+         FROM apartados_abono GROUP BY fecha, sucursal
+       ) aa ON aa.fecha = c.fecha AND aa.sucursal = c.sucursal
        WHERE c.sucursal = ?
        ORDER BY c.fecha DESC`,
       [sucursal]
