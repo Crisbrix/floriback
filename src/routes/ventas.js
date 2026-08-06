@@ -208,6 +208,19 @@ router.get('/cierre', requireAuth, requireRole('admin', 'vendedor'), async (req,
     );
     const abonosTotal = rowsAbonos.reduce((s, r) => s + (Number(r.total) || 0), 0);
 
+    //Detalle de cada abono del día (para la lista en el cierre)
+    const filtroAbonoDetalle = esAdmin ? '' : 'AND b.vendedor_id = ?';
+    const [rowsAbonosDetalle] = await pool.query(
+      `SELECT b.id, b.monto, b.metodo_pago AS paymentMethod, b.fecha AS date,
+              u.nombre AS vendedor, a.cliente_nombre AS cliente, a.producto
+       FROM apartados_abono b
+       JOIN apartados a ON a.id = b.apartado_id
+       JOIN usuarios u ON u.id = b.vendedor_id
+       WHERE b.fecha = ? AND b.sucursal = ? ${filtroAbonoDetalle}
+       ORDER BY b.id ASC`,
+      paramsAbono
+    );
+
     res.json({
       fecha: new Date().toISOString().slice(0, 10),
       sucursal,
@@ -217,7 +230,7 @@ router.get('/cierre', requireAuth, requireRole('admin', 'vendedor'), async (req,
       cajaAbierta: !!apertura,
       resumen: resumen[0],
       metodos,
-      apartados: { total: abonosTotal, metodos: rowsAbonos },
+      apartados: { total: abonosTotal, metodos: rowsAbonos, lista: rowsAbonosDetalle },
       ventas,
     });
   } catch (err) {
