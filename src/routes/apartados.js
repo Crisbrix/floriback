@@ -126,6 +126,58 @@ router.put('/:id', requireAuth, requireRole('admin', 'vendedor'), async (req, re
   }
 });
 
+//Registra un abono (pago) sobre un apartado pendiente; descuenta el saldo
+//y el monto queda como abono del día (aparece en el cierre)
+router.post('/:id(\\d+)/abono', requireAuth, requireRole('admin', 'vendedor'), async (req, res) => {
+  let conn;
+  try {
+    const id = Number(req.params.id);
+    const esAdmin = req.user.role === 'admin';
+    const { monto, metodoPago } = req.body;
+    const metodo = metodoValido(metodoPago);
+    const montoN = Number(monto) || 0;
+    const sucursal = validaSucursal(req.body.sucursal);
+    if (montoN <= 0) return res.status(400).json({ error: 'Monto inválido' });
+    const where = esAdmin ? 'WHERE id = ?' : 'WHERE id = ? AND vendedor_id = ?';
+    const idParams = esAdmin ? [id] : [id, req.user.id];
+
+    conn = await pool.getConnection();
+    await conn.beginTransaction();
+    const [[ap]] = await conn.query(`SELECT abono, saldo, estado FROM apartados ${where}`, idParams);
+    if (!ap) {
+      await conn.rollback(); conn.release();
+      return res.status(404).json({ error: 'Apartado no encontrado' });
+    }
+    if (ap.estado === 'cancelado') {
+      await conn.rollback(); conn.release();
+      return res.status(400).json({ error: 'El apartado está cancelado' });
+    }
+    const saldo = Number(ap.saldo);
+    if (montoN > saldo) {
+      await conn.rollback(); conn.release();
+      return res.status(400).json({ error: `El abono no puede superar el saldo pendiente ($ ${saldo.toLocaleString()})` });
+    }
+    const nuevoAbono = Number(ap.abono) + montoN;
+    const nuevoSaldo = saldo - montoN;
+    const nuevoEstado = nuevoSaldo <= 0 ? 'completado' : 'pendiente';
+    await conn.query(
+      `UPDATE apartados SET abono = ?, saldo = ?, estado = ?, metodo_pago = ? ${where}`,
+      [nuevoAbono, nuevoSaldo, nuevoEstado, metodo].concat(idParams)
+    );
+    await conn.query(
+      `INSERT INTO apartados_abono (apartado_id, monto, metodo_pago, fecha, vendedor_id, sucursal)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [id, montoN, metodo, hoyLocal(), req.user.id, sucursal]
+    );
+    await conn.commit();
+    conn.release(); conn = null;
+    res.json({ ok: true, abono: nuevoAbono, saldo: nuevoSaldo, estado: nuevoEstado });
+  } catch (err) {
+    if (conn) { try { await conn.rollback(); } catch {}; conn.release(); }
+    res.status(500).json({ error: err.message });
+  }
+});
+
 //Elimina apartado y sus abonos (solo admin)
 router.delete('/:id', requireAuth, requireRole('admin'), async (req, res) => {
   let conn;
