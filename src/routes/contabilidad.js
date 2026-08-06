@@ -240,16 +240,23 @@ async function calcularResumen(rango, sucursal) {
     `SELECT COALESCE(SUM(total),0) AS total FROM ventas WHERE sucursal = ?${filtro}`,
     ventaParams
   );
+  //Plata recibida de apartados (abonos) también cuenta como ingreso en contabilidad
+  const [[abonos]] = await pool.query(
+    `SELECT COALESCE(SUM(monto),0) AS total FROM apartados_abono WHERE sucursal = ?${filtro}`,
+    ventaParams
+  );
   const totalInversion = Number(inv.total);
   const totalGastos = Number(gas.total);
   const gastosDiarios = Number(gas.diarios);
-  const totalVentas = Number(ventas.total);
+  const totalVentas = Number(ventas.total) + Number(abonos.total);
+  const totalAbonos = Number(abonos.total);
   const balance = totalVentas - (totalInversion + totalGastos);
   return {
     totalInversion,
     totalGastos,
     gastosDiarios,
     totalVentas,
+    totalAbonos,
     balance,
     //Desglose por categoría para gráficos
     porCategoria: await porCategoria(rango, sucursal),
@@ -268,6 +275,12 @@ async function diarioFlujo(rango, sucursal) {
      FROM ventas WHERE sucursal = ?${filtro} GROUP BY fecha`,
     paramsV
   );
+  //Abonos de apartados del día (ingreso extra del día)
+  const [abonosDia] = await pool.query(
+    `SELECT fecha, COALESCE(SUM(monto),0) AS abonos
+     FROM apartados_abono WHERE sucursal = ?${filtro} GROUP BY fecha`,
+    paramsV
+  );
   const [contaDia] = await pool.query(
     `SELECT fecha,
        COALESCE(SUM(CASE WHEN tipo = 'gasto' THEN monto ELSE 0 END),0) AS gastos,
@@ -278,17 +291,23 @@ async function diarioFlujo(rango, sucursal) {
 
   const mapa = new Map();
   for (const v of ventasDia) {
-    mapa.set(String(v.fecha), { fecha: String(v.fecha), ventas: Number(v.ventas), cantidad: v.cantidad, gastos: 0, inversion: 0 });
+    mapa.set(String(v.fecha), { fecha: String(v.fecha), ventas: Number(v.ventas), cantidad: v.cantidad, abonos: 0, gastos: 0, inversion: 0 });
+  }
+  for (const a of abonosDia) {
+    const f = String(a.fecha);
+    const e = mapa.get(f) || { fecha: f, ventas: 0, cantidad: 0, abonos: 0, gastos: 0, inversion: 0 };
+    e.abonos += Number(a.abonos);
+    mapa.set(f, e);
   }
   for (const c of contaDia) {
     const f = String(c.fecha);
-    const e = mapa.get(f) || { fecha: f, ventas: 0, cantidad: 0, gastos: 0, inversion: 0 };
+    const e = mapa.get(f) || { fecha: f, ventas: 0, cantidad: 0, abonos: 0, gastos: 0, inversion: 0 };
     e.gastos += Number(c.gastos);
     e.inversion += Number(c.inversion);
     mapa.set(f, e);
   }
   return Array.from(mapa.values())
-    .map(e => ({ ...e, neto: e.ventas - e.gastos - e.inversion }))
+    .map(e => ({ ...e, ingresos: e.ventas + e.abonos, neto: e.ventas + e.abonos - e.gastos - e.inversion }))
     .sort((a, b) => a.fecha > b.fecha ? -1 : 1);
 }
 

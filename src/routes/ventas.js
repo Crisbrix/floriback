@@ -295,6 +295,15 @@ router.get('/informe-mensual', requireAuth, requireRole('admin'), async (req, re
        FROM ventas WHERE fecha >= ? AND fecha <= ? AND sucursal = ?`,
       [inicio, fin, sucursal]
     );
+    //Abonos de apartados del mes (ingreso extra que también cuenta)
+    const [[abonosMes]] = await pool.query(
+      `SELECT COALESCE(SUM(monto),0) AS total, COUNT(*) AS cantidad
+       FROM apartados_abono WHERE fecha >= ? AND fecha <= ? AND sucursal = ?`,
+      [inicio, fin, sucursal]
+    );
+    resumen.monto = Number(resumen.monto) + Number(abonosMes.total);
+    resumen.abonos = Number(abonosMes.total);
+    resumen.abonoCantidad = Number(abonosMes.cantidad);
 
     const [porVendedor] = await pool.query(
       `SELECT u.nombre AS vendedor, COUNT(*) AS ventas, COALESCE(SUM(v.total),0) AS total
@@ -309,13 +318,31 @@ router.get('/informe-mensual', requireAuth, requireRole('admin'), async (req, re
        FROM ventas WHERE fecha >= ? AND fecha <= ? AND sucursal = ?`,
       [inicio, fin, sucursal]
     );
-    const porMetodo = expandirMetodos(rowsMetodos).sort((a, b) => b.total - a.total);
+    //Abonos de apartados: también cuentan por método de pago
+    const [rowsAbonosMetodos] = await pool.query(
+      `SELECT metodo_pago, monto AS total, NULL AS detalles_pago, NULL AS grupo_id
+       FROM apartados_abono WHERE fecha >= ? AND fecha <= ? AND sucursal = ?`,
+      [inicio, fin, sucursal]
+    );
+    const porMetodo = expandirMetodos(rowsMetodos.concat(rowsAbonosMetodos)).sort((a, b) => b.total - a.total);
 
     const [diario] = await pool.query(
       `SELECT fecha, COUNT(*) AS cantidad, COALESCE(SUM(total),0) AS ingresos
        FROM ventas WHERE fecha >= ? AND fecha <= ? AND sucursal = ? GROUP BY fecha ORDER BY fecha ASC`,
       [inicio, fin, sucursal]
     );
+    //Agrega abonos al flujo diario del mes
+    const [abonosDiarioMes] = await pool.query(
+      `SELECT fecha, COALESCE(SUM(monto),0) AS abonos
+       FROM apartados_abono WHERE fecha >= ? AND fecha <= ? AND sucursal = ? GROUP BY fecha`,
+      [inicio, fin, sucursal]
+    );
+    const diarioAbonos = new Map(abonosDiarioMes.map(r => [String(r.fecha), Number(r.abonos)]));
+    for (const d of diario) {
+      const ab = diarioAbonos.get(String(d.fecha)) || 0;
+      d.ingresos = Number(d.ingresos) + ab;
+      d.abonos = ab;
+    }
 
     const efectivo = porMetodo.filter(m => m.metodo_pago === 'efectivo').reduce((s, m) => s + Number(m.total), 0);
     const tarjeta = porMetodo.filter(m => m.metodo_pago === 'tarjeta').reduce((s, m) => s + Number(m.total), 0);
