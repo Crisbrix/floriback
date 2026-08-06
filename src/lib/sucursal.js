@@ -82,6 +82,31 @@ export function asegurarSucursales() {
       } catch (err) {
         console.error('abonos migration error:', err.message);
       }
+      //El apartado recuerda su ultimo metodo de pago (editable siempre)
+      try {
+        const [colsMetodo] = await pool.query(
+          `SELECT COUNT(*) AS n FROM information_schema.COLUMNS
+           WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'apartados' AND COLUMN_NAME = 'metodo_pago'`
+        );
+        if (!colsMetodo[0].n) {
+          await pool.query(`ALTER TABLE apartados ADD COLUMN metodo_pago VARCHAR(20) NOT NULL DEFAULT 'efectivo'`);
+        }
+      } catch (err) {
+        console.error('metodo_pago migration error:', err.message);
+      }
+      //Respaldo: apartados creados antes de esta funcion registran su abono inicial
+      //en su dia original (idempotente: solo los que no tienen ningun abono)
+      try {
+        await pool.query(
+          `INSERT INTO apartados_abono (apartado_id, monto, metodo_pago, fecha, vendedor_id, sucursal)
+           SELECT a.id, a.abono, a.metodo_pago, a.fecha, a.vendedor_id, a.sucursal
+           FROM apartados a
+           WHERE a.abono > 0
+             AND NOT EXISTS (SELECT 1 FROM apartados_abono b WHERE b.apartado_id = a.id)`
+        );
+      } catch (err) {
+        console.error('abonos backfill error:', err.message);
+      }
     })().catch(err => {
       console.error('sucursal migration error:', err.message);
     });

@@ -11,12 +11,10 @@ function metodoValido(m) {
   return METODOS.includes(m) ? m : 'efectivo';
 }
 
-//Agrega a la proyeccion el metodo del ultimo abono registrado
+//El apartado guarda su ultimo metodo de pago (se edita siempre, sin depender del abono)
 const COLUMNAS = `a.id, a.cliente_nombre AS clienteNombre, a.cliente_celular AS clienteCelular,
                 a.cliente_correo AS clienteCorreo, a.producto, a.abono, a.saldo, a.fecha AS date,
-                a.estado, a.comentario, u.nombre AS vendedor,
-                (SELECT b.metodo_pago FROM apartados_abono b
-                 WHERE b.apartado_id = a.id ORDER BY b.id DESC LIMIT 1) AS metodoPago`;
+                a.estado, a.comentario, u.nombre AS vendedor, a.metodo_pago AS metodoPago`;
 
 //Lista apartados (admin ve todos los del local, vendedor solo los suyos del local)
 router.get('/', requireAuth, requireRole('admin', 'vendedor'), async (req, res) => {
@@ -52,12 +50,13 @@ router.post('/', requireAuth, requireRole('admin', 'vendedor'), async (req, res)
     if (!clienteNombre || !producto) return res.status(400).json({ error: 'Nombre del cliente y producto requeridos' });
     const abonoN = Number(abono) || 0;
     const saldoN = Number(saldo) || 0;
+    const estadoNuevo = saldoN <= 0 ? 'completado' : 'pendiente';
     conn = await pool.getConnection();
     await conn.beginTransaction();
     const [result] = await conn.query(
-      `INSERT INTO apartados (cliente_nombre, cliente_celular, cliente_correo, producto, abono, saldo, fecha, vendedor_id, estado, comentario, sucursal)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pendiente', ?, ?)`,
-      [clienteNombre, clienteCelular || '', clienteCorreo || '', producto, abonoN, saldoN, hoyLocal(), req.user.id, comentario || '', sucursal]
+      `INSERT INTO apartados (cliente_nombre, cliente_celular, cliente_correo, producto, abono, saldo, fecha, vendedor_id, estado, comentario, sucursal, metodo_pago)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [clienteNombre, clienteCelular || '', clienteCorreo || '', producto, abonoN, saldoN, hoyLocal(), req.user.id, estadoNuevo, comentario || '', sucursal, metodo]
     );
     if (abonoN > 0) {
       await conn.query(
@@ -108,13 +107,13 @@ router.put('/:id', requireAuth, requireRole('admin', 'vendedor'), async (req, re
 
     const params = esAdmin
       ? [clienteNombre, clienteCelular || '', clienteCorreo || '', producto,
-         abonoN, saldoN, estado || 'pendiente', comentario || '', id]
+         abonoN, saldoN, estado || 'pendiente', comentario || '', metodo, id]
       : [clienteNombre, clienteCelular || '', clienteCorreo || '', producto,
-         abonoN, saldoN, estado || 'pendiente', comentario || '', id, req.user.id];
+         abonoN, saldoN, estado || 'pendiente', comentario || '', metodo, id, req.user.id];
     await conn.query(
       `UPDATE apartados
        SET cliente_nombre = ?, cliente_celular = ?, cliente_correo = ?, producto = ?,
-           abono = ?, saldo = ?, estado = ?, comentario = ?
+           abono = ?, saldo = ?, estado = ?, comentario = ?, metodo_pago = ?
        ${where}`,
       params
     );
