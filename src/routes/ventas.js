@@ -197,28 +197,26 @@ router.get('/cierre', requireAuth, requireRole('admin', 'vendedor'), async (req,
     );
     const metodos = expandirMetodos(rowsMetodos).sort((a, b) => b.total - a.total);
 
-    //Plata recibida de apartados (abonos) en el día
-    const filtroAbono = esAdmin ? '' : 'AND vendedor_id = ?';
-    const paramsAbono = esAdmin ? [hoy, sucursal] : [hoy, sucursal, req.user.id];
+    //Plata recibida de apartados (abonos) en el día — visible para todos
+    const filtroAbono = ''; //sin filtro por vendedor: todos ven los abonos
     const [rowsAbonos] = await pool.query(
       `SELECT metodo_pago, SUM(monto) AS total FROM apartados_abono
        WHERE fecha = ? AND sucursal = ? ${filtroAbono} GROUP BY metodo_pago
        ORDER BY total DESC`,
-      paramsAbono
+      [hoy, sucursal]
     );
     const abonosTotal = rowsAbonos.reduce((s, r) => s + (Number(r.total) || 0), 0);
 
-    //Detalle de cada abono del día (para la lista en el cierre)
-    const filtroAbonoDetalle = esAdmin ? '' : 'AND b.vendedor_id = ?';
+    //Detalle de cada abono del día (para la lista en el cierre) — todos lo ven
     const [rowsAbonosDetalle] = await pool.query(
       `SELECT b.id, b.monto, b.metodo_pago AS paymentMethod, b.fecha AS date,
               u.nombre AS vendedor, a.cliente_nombre AS cliente, a.producto
        FROM apartados_abono b
        JOIN apartados a ON a.id = b.apartado_id
        JOIN usuarios u ON u.id = b.vendedor_id
-       WHERE b.fecha = ? AND b.sucursal = ? ${filtroAbonoDetalle}
+       WHERE b.fecha = ? AND b.sucursal = ?
        ORDER BY b.id ASC`,
-      paramsAbono
+      [hoy, sucursal]
     );
 
     res.json({

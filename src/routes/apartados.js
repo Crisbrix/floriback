@@ -30,9 +30,9 @@ router.get('/', requireAuth, requireRole('admin', 'vendedor'), async (req, res) 
       : `SELECT ${COLUMNAS}
          FROM apartados a
          JOIN usuarios u ON u.id = a.vendedor_id
-         WHERE a.sucursal = ? AND a.vendedor_id = ?
+         WHERE a.sucursal = ?
          ORDER BY a.estado ASC, a.fecha DESC`;
-    const params = esAdmin ? [sucursal] : [sucursal, req.user.id];
+    const params = esAdmin ? [sucursal] : [sucursal];
     const [rows] = await pool.query(query, params);
     res.json(rows);
   } catch (err) {
