@@ -5,6 +5,16 @@ import { validaSucursal } from '../lib/sucursal.js';
 
 const router = Router();
 
+function parseProductosNuevo(val) {
+  if (!val) return [];
+  try {
+    const arr = JSON.parse(val);
+    return Array.isArray(arr) ? arr : [];
+  } catch {
+    return val ? [{ name: val, quantity: 1 }] : [];
+  }
+}
+
 //Lista devoluciones, opcionalmente filtradas por fecha y sucursal
 router.get('/', requireAuth, requireRole('admin', 'vendedor'), async (req, res) => {
   try {
@@ -24,18 +34,21 @@ router.get('/', requireAuth, requireRole('admin', 'vendedor'), async (req, res) 
     }
     query += ' ORDER BY d.id DESC LIMIT 100';
     const [rows] = await pool.query(query, params);
+    for (const r of rows) {
+      r.productosNuevo = parseProductosNuevo(r.productoNuevo);
+    }
     res.json(rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-//Registra una devolución o cambio
+//Registra una devolución o cambio (soporta múltiples prendas de cambio)
 router.post('/', requireAuth, requireRole('admin', 'vendedor'), async (req, res) => {
   let conn;
   try {
     conn = await pool.getConnection();
-    const { ventaId, productoOriginal, productoNuevo, cantidad = 1, diferenciaPrecio = 0, motivo = '' } = req.body;
+    const { ventaId, productoOriginal, productosNuevo = [], cantidad = 1, diferenciaPrecio = 0, motivo = '' } = req.body;
     const sucursal = validaSucursal(req.body.sucursal);
     if (!productoOriginal) {
       conn.release();
@@ -52,31 +65,43 @@ router.post('/', requireAuth, requireRole('admin', 'vendedor'), async (req, res)
       [cant, productoOriginal, sucursal]
     );
 
-    //Si hay cambio por otro producto, decrementa stock del nuevo
-    if (productoNuevo && productoNuevo !== productoOriginal) {
-      const [rows] = await conn.query(
-        'SELECT stock FROM productos WHERE nombre = ? AND sucursal = ?',
-        [productoNuevo, sucursal]
-      );
-      if (!rows.length) {
-        await conn.rollback(); conn.release();
-        return res.status(404).json({ error: `Producto ${productoNuevo} no encontrado` });
+    //Si hay prendas de cambio, valida stock y decrementa cada una
+    if (productosNuevo.length) {
+      for (const p of productosNuevo) {
+        const pCant = Number(p.quantity) || 1;
+        if (p.name === productoOriginal) continue;
+        const [rows] = await conn.query(
+          'SELECT stock FROM productos WHERE nombre = ? AND sucursal = ?',
+          [p.name, sucursal]
+        );
+        if (!rows.length) {
+          await conn.rollback(); conn.release();
+          return res.status(404).json({ error: `Producto ${p.name} no encontrado` });
+        }
+        if (rows[0].stock < pCant) {
+          await conn.rollback(); conn.release();
+          return res.status(400).json({ error: `Stock insuficiente de ${p.name} (necesita ${pCant}, hay ${rows[0].stock})` });
+        }
+        await conn.query(
+          'UPDATE productos SET stock = stock - ? WHERE nombre = ? AND sucursal = ?',
+          [pCant, p.name, sucursal]
+        );
       }
-      if (rows[0].stock < cant) {
-        await conn.rollback(); conn.release();
-        return res.status(400).json({ error: `Stock insuficiente de ${productoNuevo}` });
-      }
-      await conn.query(
-        'UPDATE productos SET stock = stock - ? WHERE nombre = ? AND sucursal = ?',
-        [cant, productoNuevo, sucursal]
-      );
+    }
+
+    //Serializa productos de cambio: si hay 1 es string, si hay más es JSON
+    let productoNuevoDb = null;
+    if (productosNuevo.length === 1) {
+      productoNuevoDb = productosNuevo[0].name;
+    } else if (productosNuevo.length > 1) {
+      productoNuevoDb = JSON.stringify(productosNuevo);
     }
 
     //Registra la devolución
     const [result] = await conn.query(
       `INSERT INTO devoluciones (venta_id, producto_original, producto_nuevo, cantidad, diferencia_precio, motivo, sucursal, fecha, vendedor_id)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [ventaId || null, productoOriginal, productoNuevo || null, cant, dif, motivo, sucursal, hoyLocal(), req.user.id]
+      [ventaId || null, productoOriginal, productoNuevoDb, cant, dif, motivo, sucursal, hoyLocal(), req.user.id]
     );
 
     await conn.commit();
@@ -109,11 +134,14 @@ router.delete('/:id(\\d+)', requireAuth, requireRole('admin'), async (req, res) 
       [dev.cantidad, dev.producto_original, dev.sucursal]
     );
 
-    //Si había producto de cambio, restaura stock del nuevo
-    if (dev.producto_nuevo && dev.producto_nuevo !== dev.producto_original) {
+    //Restaura stock de cada producto de cambio
+    const productosNuevos = parseProductosNuevo(dev.producto_nuevo);
+    for (const p of productosNuevos) {
+      const pCant = Number(p.quantity) || 1;
+      if (p.name === dev.producto_original) continue;
       await conn.query(
         'UPDATE productos SET stock = stock + ? WHERE nombre = ? AND sucursal = ?',
-        [dev.cantidad, dev.producto_nuevo, dev.sucursal]
+        [pCant, p.name, dev.sucursal]
       );
     }
 
