@@ -239,4 +239,52 @@ router.delete('/abono/:id', requireAuth, requireRole('admin'), async (req, res) 
   }
 });
 
+//Edita un abono individual (monto y método) y ajusta el apartado (solo admin)
+router.put('/abono/:id', requireAuth, requireRole('admin'), async (req, res) => {
+  let conn;
+  try {
+    const abonoId = Number(req.params.id);
+    const { monto, metodoPago } = req.body;
+    const metodo = metodoValido(metodoPago);
+    const montoN = Number(monto) || 0;
+    if (montoN <= 0) return res.status(400).json({ error: 'Monto inválido' });
+
+    conn = await pool.getConnection();
+    await conn.beginTransaction();
+
+    const [[abono]] = await conn.query('SELECT * FROM apartados_abono WHERE id = ?', [abonoId]);
+    if (!abono) {
+      await conn.rollback(); conn.release();
+      return res.status(404).json({ error: 'Abono no encontrado' });
+    }
+
+    const apartadoId = abono.apartado_id;
+    const montoViejo = Number(abono.monto);
+    const diferencia = montoN - montoViejo;
+
+    await conn.query(
+      'UPDATE apartados_abono SET monto = ?, metodo_pago = ? WHERE id = ?',
+      [montoN, metodo, abonoId]
+    );
+
+    const [[ap]] = await conn.query('SELECT abono, saldo, estado FROM apartados WHERE id = ?', [apartadoId]);
+    if (ap) {
+      const nuevoAbono = Number(ap.abono) + diferencia;
+      const nuevoSaldo = Number(ap.saldo) - diferencia;
+      const nuevoEstado = nuevoSaldo <= 0 ? 'completado' : 'pendiente';
+      await conn.query(
+        'UPDATE apartados SET abono = ?, saldo = ?, estado = ?, metodo_pago = ? WHERE id = ?',
+        [nuevoAbono, nuevoSaldo, nuevoEstado, metodo, apartadoId]
+      );
+    }
+
+    await conn.commit();
+    conn.release(); conn = null;
+    res.json({ ok: true });
+  } catch (err) {
+    if (conn) { try { await conn.rollback(); } catch {}; conn.release(); }
+    res.status(500).json({ error: err.message });
+  }
+});
+
 export default router;
