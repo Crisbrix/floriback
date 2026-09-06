@@ -210,7 +210,8 @@ router.get('/cierre', requireAuth, requireRole('admin', 'vendedor'), async (req,
     //Detalle de cada abono del día (para la lista en el cierre) — todos lo ven
     const [rowsAbonosDetalle] = await pool.query(
       `SELECT b.id, b.monto, b.metodo_pago AS paymentMethod, b.fecha AS date,
-              u.nombre AS vendedor, a.cliente_nombre AS cliente, a.producto
+              u.nombre AS vendedor, a.cliente_nombre AS cliente, a.producto,
+              b.apartado_id AS apartadoId
        FROM apartados_abono b
        JOIN apartados a ON a.id = b.apartado_id
        JOIN usuarios u ON u.id = b.vendedor_id
