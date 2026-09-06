@@ -219,6 +219,19 @@ router.get('/cierre', requireAuth, requireRole('admin', 'vendedor'), async (req,
       [hoy, sucursal]
     );
 
+    //Apartados del día (creados hoy) para poder editar/borrar desde el cierre
+    const [apartadosHoy] = await pool.query(
+      `SELECT a.id, a.cliente_nombre AS clienteNombre, a.cliente_celular AS clienteCelular,
+              a.cliente_correo AS clienteCorreo, a.producto, a.abono, a.saldo,
+              a.estado, a.comentario, a.metodo_pago AS metodoPago, a.fecha,
+              u.nombre AS vendedor
+       FROM apartados a
+       JOIN usuarios u ON u.id = a.vendedor_id
+       WHERE a.fecha = ? AND a.sucursal = ?
+       ORDER BY a.id ASC`,
+      [hoy, sucursal]
+    );
+
     res.json({
       fecha: new Date().toISOString().slice(0, 10),
       sucursal,
@@ -229,6 +242,7 @@ router.get('/cierre', requireAuth, requireRole('admin', 'vendedor'), async (req,
       resumen: resumen[0],
       metodos,
       apartados: { total: abonosTotal, metodos: rowsAbonos, lista: rowsAbonosDetalle },
+      apartadosHoy,
       ventas,
     });
   } catch (err) {

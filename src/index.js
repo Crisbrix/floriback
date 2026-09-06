@@ -12,6 +12,7 @@ import apartadoRoutes from './routes/apartados.js';
 import melsusRoutes from './routes/melsus.js';
 import contabilidadRoutes from './routes/contabilidad.js';
 import uploadRoutes from './routes/upload.js';
+import devolucionRoutes from './routes/devoluciones.js';
 import { asegurarSucursales, asegurarStockEnProductos } from './lib/sucursal.js';
 
 //Migración automática: agrega columna sucursal a todas las tablas que la necesitan
@@ -43,6 +44,7 @@ app.use('/api/apartados', apartadoRoutes);
 app.use('/api/melsus', melsusRoutes);
 app.use('/api/contabilidad', contabilidadRoutes);
 app.use('/api/upload', uploadRoutes);
+app.use('/api/devoluciones', devolucionRoutes);
 
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok' });
