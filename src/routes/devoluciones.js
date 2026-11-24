@@ -5,6 +5,42 @@ import { validaSucursal } from '../lib/sucursal.js';
 
 const router = Router();
 
+//Crea la tabla devoluciones si no existe (una vez por proceso, seguro en serverless)
+let tablaPromise = null;
+function asegurarTabla() {
+  if (!tablaPromise) {
+    tablaPromise = pool.query(`
+      CREATE TABLE IF NOT EXISTS devoluciones (
+        id                INT          AUTO_INCREMENT PRIMARY KEY,
+        venta_id          INT,
+        producto_original VARCHAR(120) NOT NULL,
+        producto_nuevo    TEXT,
+        cantidad          INT          NOT NULL DEFAULT 1,
+        diferencia_precio DECIMAL(12,0) NOT NULL DEFAULT 0,
+        motivo            TEXT,
+        sucursal          VARCHAR(20)  NOT NULL DEFAULT 'floripondia',
+        fecha             DATE         NOT NULL,
+        vendedor_id       INT          NOT NULL,
+        creado_en         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_dev_fecha_suc (fecha, sucursal),
+        FOREIGN KEY (venta_id) REFERENCES ventas(id) ON UPDATE CASCADE ON DELETE SET NULL,
+        FOREIGN KEY (vendedor_id) REFERENCES usuarios(id) ON UPDATE CASCADE
+      ) ENGINE=InnoDB
+    `).catch(err => {
+      console.error('devoluciones init error:', err.message);
+      tablaPromise = null; //reintenta en el próximo request
+    });
+  }
+  return tablaPromise;
+}
+asegurarTabla();
+
+//Garantiza la tabla antes de cada request
+router.use(async (_req, _res, next) => {
+  await asegurarTabla();
+  next();
+});
+
 function parseProductosNuevo(val) {
   if (!val) return [];
   try {
